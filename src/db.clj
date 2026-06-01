@@ -50,12 +50,12 @@
     (try
       (sqlite/execute! conn ["BEGIN"])
       (let [tx-id (next-tx-id! conn)]
-        (doseq [{:keys [entity attribute value valid-time]
-                 :or   {valid-time tx-time}} facts]
+        (doseq [{:keys [entity attribute value valid-time retracted]
+                 :or   {valid-time tx-time retracted false}} facts]
           (sqlite/execute! conn
-                           ["INSERT INTO facts (entity, attribute, value, valid_time, tx_time, tx_id)
-              VALUES (?, ?, ?, ?, ?, ?)"
-                            (str entity) (str attribute) (str value) valid-time tx-time tx-id]))
+                           ["INSERT INTO facts (entity, attribute, value, valid_time, tx_time, tx_id, retracted)
+              VALUES (?, ?, ?, ?, ?, ?, ?)"
+                            (str entity) (str attribute) (str value) valid-time tx-time tx-id retracted]))
         (sqlite/execute! conn ["COMMIT"])
         tx-id)
       (catch Exception e
@@ -116,9 +116,46 @@
          (map row->datom))))
 
 (defn query
-  "Returns query-as-of results as a nested map of {entity {attribute value}}."
+  "Returns query-as-of results as a sequence of flat maps, each with :db/entity."
   [db opts]
-  (reduce (fn query* [acc {:db/keys [entity attribute value]}]
-            (update acc entity assoc attribute value))
-          {}
-          (query-as-of db opts)))
+  (->> (query-as-of db opts)
+       (reduce (fn [acc {:db/keys [entity attribute value]}]
+                 (update acc entity (fnil assoc {:db/entity entity}) attribute value))
+               {})
+       vals))
+
+(defn- index-by-entity [records]
+  (into {} (map (fn [r] [(:db/entity r) (dissoc r :db/entity)]) records)))
+
+(defn upsert!
+  "Applies data-records to the db, writing only changed key/value pairs as facts.
+   Each record must contain :db/entity; remaining keys are attribute/value pairs.
+   Returns the assigned tx-id, or nil when no facts changed.
+
+   opts:
+     :missing-keys — :ignore (default) leaves absent attributes untouched;
+                     :retract retracts attributes present in the db but absent
+                     from the incoming record."
+  ([db records] (upsert! db records {}))
+  ([db records {:keys [missing-keys] :or {missing-keys :ignore}}]
+   (let [entities    (into #{} (map :db/entity records))
+         current-idx (->> (query db {:entities entities}) index-by-entity)
+         facts       (for [record  records
+                           :let    [entity    (:db/entity record)
+                                    incoming  (dissoc record :db/entity)
+                                    existing  (get current-idx entity {})
+                                    changed   (into [] (remove (fn [[k v]] (= v (get existing k)))) incoming)
+                                    retracted (when (= missing-keys :retract)
+                                                (->> (keys existing)
+                                                     (remove #(contains? incoming %))
+                                                     (map (fn [k]
+                                                            {:entity    entity
+                                                             :attribute k
+                                                             :value     (get existing k)
+                                                             :retracted true}))))]]
+                      (concat
+                       (map (fn [[k v]] {:entity entity :attribute k :value v}) changed)
+                       retracted))
+         all-facts   (into [] cat facts)]
+     (when (seq all-facts)
+       (insert-facts! db all-facts)))))

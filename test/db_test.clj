@@ -146,24 +146,29 @@
 
 ;; query ;;
 
-(deftest query-returns-nested-entity-attribute-map
-  (let [result (db/query *db* {})]
-    (is (= "Alicia"        (get-in result ["user/alice" :user/name])))
-    (is (= "a@example.com" (get-in result ["user/alice" :user/email])))
-    (is (= "Bob Smith"     (get-in result ["user/bob"   :user/name])))
+(defn- entity-record
+  "Returns the single flat record for an entity from the db, or nil."
+  [db entity]
+  (let [props {:entities #{entity}}]
+    (-> db (db/query props) first)))
+
+(deftest query-returns-flat-maps-with-entity-key
+  (let [result (set (db/query *db* {}))]
+    (is (contains? result {:db/entity "user/alice" :user/name "Alicia" :user/email "a@example.com"}))
+    (is (contains? result {:db/entity "user/bob"   :user/name "Bob Smith"}))
     ;; carol is retracted — must not appear
-    (is (nil? (get result "user/carol")))))
+    (is (not (contains? (set (map :db/entity result)) "user/carol")))))
 
 (deftest query-scoped-to-single-entity
-  (let [result (db/query *db* {:entities #{"user/alice"}})]
-    (is (= {"user/alice" {:user/name "Alicia" :user/email "a@example.com"}}
+  (let [result (set (db/query *db* {:entities #{"user/alice"}}))]
+    (is (= #{{:db/entity "user/alice" :user/name "Alicia" :user/email "a@example.com"}}
            result))))
 
 (deftest query-scoped-to-multiple-entities
-  (let [result (db/query *db* {:entities #{"user/alice" "user/bob"}})]
-    (is (= #{"user/alice" "user/bob"} (set (keys result))))
-    (is (= "Alicia"    (get-in result ["user/alice" :user/name])))
-    (is (= "Bob Smith" (get-in result ["user/bob"   :user/name])))))
+  (let [result (set (db/query *db* {:entities #{"user/alice" "user/bob"}}))]
+    (is (= #{{:db/entity "user/alice" :user/name "Alicia" :user/email "a@example.com"}
+             {:db/entity "user/bob"   :user/name "Bob Smith"}}
+           result))))
 
 ;; insert-facts! ;;
 
@@ -193,3 +198,53 @@
         res (db/query-as-of *db* {:entities #{"user/frank"}})]
     (is (= 1 (count res)))
     (is (= "Frank" (:db/value (first res))))))
+
+(deftest insert-facts-retracted-fact-is-suppressed
+  ;; inserting a retracted fact should hide it from query results
+  (db/insert-facts! *db* [{:entity    "user/alice"
+                            :attribute ":user/email"
+                            :value     "a@example.com"
+                            :retracted true}])
+  (is (nil? (:user/email (entity-record *db* "user/alice")))))
+
+;; upsert! ;;
+
+(deftest upsert-no-op-returns-nil
+  ;; upserting unchanged values writes nothing and returns nil
+  (let [result (db/upsert! *db* [{:db/entity  "user/alice"
+                                   :user/name  "Alicia"
+                                   :user/email "a@example.com"}])]
+    (is (nil? result))))
+
+(deftest upsert-changed-value-writes-only-diff
+  ;; only the changed attribute is written; untouched attributes survive
+  (db/upsert! *db* [{:db/entity "user/alice" :user/name "Alicia V2"}])
+  (let [record (entity-record *db* "user/alice")]
+    (is (= "Alicia V2"    (:user/name record)))
+    (is (= "a@example.com" (:user/email record)))))
+
+(deftest upsert-new-entity-writes-all-attributes
+  (db/upsert! *db* [{:db/entity "user/dave" :user/name "Dave"}])
+  (is (= {:db/entity "user/dave" :user/name "Dave"}
+         (entity-record *db* "user/dave"))))
+
+(deftest upsert-missing-keys-ignore-leaves-existing
+  (db/upsert! *db* [{:db/entity "user/alice" :user/name "Alicia V2"}]
+              {:missing-keys :ignore})
+  (let [record (entity-record *db* "user/alice")]
+    (is (= "Alicia V2"    (:user/name record)))
+    (is (= "a@example.com" (:user/email record)))))
+
+(deftest upsert-missing-keys-retract-removes-absent
+  (db/upsert! *db* [{:db/entity "user/alice" :user/name "Alicia V2"}]
+              {:missing-keys :retract})
+  (let [record (entity-record *db* "user/alice")]
+    (is (= "Alicia V2" (:user/name record)))
+    (is (nil? (:user/email record)))))
+
+(deftest upsert-multiple-records-in-one-transaction
+  (let [tx-id (db/upsert! *db* [{:db/entity "user/alice" :user/name "Alicia V2"}
+                                 {:db/entity "user/bob"   :user/name "Bobby"}])]
+    (is (integer? tx-id))
+    (is (= "Alicia V2" (:user/name (entity-record *db* "user/alice"))))
+    (is (= "Bobby"     (:user/name (entity-record *db* "user/bob"))))))
