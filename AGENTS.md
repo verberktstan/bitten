@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS facts (
 );
 ```
 
-- **Never** `UPDATE` or `DELETE` rows. Retraction is a new row with `retracted = 1`.
+- **Never** `UPDATE` or `DELETE` rows. Retraction is a new row with `retracted = true`.
 - `tx_id` groups facts written in the same transaction.
 - Queries must be able to filter by `valid_time` range and `tx_time` range independently (bi-temporal).
 
@@ -110,11 +110,26 @@ Hard-won constraints to apply from the start, not rediscover mid-session.
 - The pod API is `(sqlite/execute! db [sql & params])` and `(sqlite/query db [sql & params])` — SQL and params are a **single vector**, not separate arguments. Passing `db sql params` as three separate args silently passes zero parameters to the query engine.
 - `:memory:` databases do not persist across pod calls; each `execute!` / `query` opens a fresh connection. Use a unique temp file per test (e.g. `(str "/tmp/bitten-test-" (System/nanoTime) ".db")`) and delete it in a `finally` block.
 - `BEGIN` / `COMMIT` transactions require a **persistent connection**. Use `(sqlite/get-connection path)` → run statements → `(sqlite/close-connection conn)`. Path-based calls use a new connection per call and will throw "no transaction is active" on `COMMIT`.
-- `migrate!` and other functions that take a db handle should accept both a plain path string and a map containing `:db-path` (or similar). Use a private `db->path` helper to normalise the input before passing it to the pod.
+- `migrate!` returns whatever `sqlite/execute!` returns (a result map), making it thread-friendly: `(-> {:db-path path} db/migrate!)`. The fixture extracts the `:db-path` key; `*db*` is always bound to a plain path string before reaching any `db/` function.
 
 **Babashka / SCI var behaviour**
 - `^:private` on a bare `def` is **broken in SCI** — the var appears `SciUnbound` at runtime even within the same namespace. Use plain `def` for namespace-level constants in test files; use `defn-` (which does work) for private helper functions.
 - When using `replace_all` on a string literal, the replacement will also hit any `def` that *defines* that literal, creating a self-referential binding. Scope replacements carefully or fix the definition site in a separate edit.
+
+**Pod process / EOF noise**
+- When the Babashka JVM exits, the go-sqlite3 pod subprocess sees EOF on its stdin and logs `Unrecoverable error: EOF` to stderr. This is cosmetic — tests are unaffected. `pods/unload-pod` does not cause the pod to exit cleanly (it closes stdin, which *triggers* the log); `ProcessHandle.destroy()` / `.destroyForcibly()` kill the process before it can log, but the pod process may still outlive the JVM exit by a few milliseconds. The simplest accepted state: the error appears on stderr after a test run and can be ignored.
+
+## Performance — Reduction Over Query Results
+
+`query` folds a seq of datoms into a nested map with a plain `reduce`. Three alternatives were evaluated:
+
+| Option | Available in Babashka? | Verdict |
+|---|---|---|
+| `transduce` | Yes | No gain as a drop-in: `query-as-of` already returns a realised lazy seq, so there is nothing to fuse. Would require restructuring `query-as-of` to thread a transducer all the way from raw pod rows to the reducing step. |
+| `clojure.core.reducers` / `r/fold` | **No** — not on Babashka's SCI classpath | Ruled out immediately. Even on full JVM Clojure it requires a foldable vector input and fork/join overhead that only pays off at very large collection sizes. |
+| `volatile!` mutable accumulator | Yes | Marginally faster in tight loops (avoids per-step closure allocation); the underlying persistent map operations are unchanged. Trades purity for a micro-optimisation that is invisible against the SQLite roundtrip latency. |
+
+**Decision: keep plain `reduce` with immutable `{}`.** The bottleneck is the SQL pod call, not the Clojure fold. Revisit only if profiling shows the reduction itself as a hotspot for result sets in the hundreds of thousands.
 
 ## What to Avoid
 
