@@ -53,6 +53,15 @@
        first
        :db/value))
 
+;; Time constants for navigating the test dataset.
+;; All are relative to the four transactions documented above.
+(def before-any-facts     "2023-01-01") ; predates every recorded fact
+(def before-alice-renamed "2024-05-01") ; valid-time: before alice's rename (effective 2024-06-01)
+(def after-alice-renamed  "2024-07-01") ; valid-time: after alice's rename took effect
+(def before-bob-corrected "2024-06-01") ; tx-time: before bob's correction was recorded (tx 3, 2024-09-01)
+(def after-all-events     "2024-12-31") ; valid-time or tx-time: after all test transactions
+(def far-future           "9999-12-31") ; beyond all test data; used in insert tests
+
 ;; fixture ;;
 
 (def ^:dynamic *db* nil)
@@ -71,8 +80,8 @@
 (deftest basic-entity-lookup
   ;; alice at a time when only tx-1 facts exist
   (let [res (db/query-as-of *db* {:entity     "user/alice"
-                                  :valid-time "2024-03-01"
-                                  :tx-time    "2024-12-31"})]
+                                  :valid-time before-alice-renamed
+                                  :tx-time    after-all-events})]
     (is (= 2 (count res)))
     (is (some #(= % {:db/entity "user/alice" :db/attribute ":user/name"  :db/value "Alice"})         res))
     (is (some #(= % {:db/entity "user/alice" :db/attribute ":user/email" :db/value "a@example.com"}) res))))
@@ -80,41 +89,41 @@
 (deftest name-changed-in-valid-time
   ;; querying after alice's new valid-time returns the updated name
   (let [res (db/query-as-of *db* {:entity     "user/alice"
-                                  :valid-time "2024-07-01"
-                                  :tx-time    "2024-12-31"})]
+                                  :valid-time after-alice-renamed
+                                  :tx-time    after-all-events})]
     (is (= "Alicia" (name-of res "user/alice")))))
 
 (deftest query-before-name-change-valid-time
   ;; querying before alice's new valid-time still returns the old name
   (let [res (db/query-as-of *db* {:entity     "user/alice"
-                                  :valid-time "2024-05-01"
-                                  :tx-time    "2024-12-31"})]
+                                  :valid-time before-alice-renamed
+                                  :tx-time    after-all-events})]
     (is (= "Alice" (name-of res "user/alice")))))
 
 (deftest retroactive-correction-before-known
   ;; querying bob as of tx-time BEFORE the correction was recorded → original value
   (let [res (db/query-as-of *db* {:entity     "user/bob"
-                                  :valid-time "2024-03-01"
-                                  :tx-time    "2024-06-01"})]
+                                  :valid-time before-alice-renamed
+                                  :tx-time    before-bob-corrected})]
     (is (= "Bob" (name-of res "user/bob")))))
 
 (deftest retroactive-correction-after-known
   ;; querying bob as of tx-time AFTER the correction was recorded → corrected value
   (let [res (db/query-as-of *db* {:entity     "user/bob"
-                                  :valid-time "2024-03-01"
-                                  :tx-time    "2024-12-31"})]
+                                  :valid-time before-alice-renamed
+                                  :tx-time    after-all-events})]
     (is (= "Bob Smith" (name-of res "user/bob")))))
 
 (deftest retracted-fact-returns-empty
   ;; carol's name was retracted; entity should return no results
   (let [res (db/query-as-of *db* {:entity     "user/carol"
-                                  :valid-time "2024-12-31"
-                                  :tx-time    "2024-12-31"})]
+                                  :valid-time after-all-events
+                                  :tx-time    after-all-events})]
     (is (empty? res))))
 
 (deftest no-entity-filter-returns-all-entities
   ;; omitting :entity returns facts for every entity
-  (let [res      (db/query-as-of *db* {:valid-time "2024-12-31" :tx-time "2024-12-31"})
+  (let [res      (db/query-as-of *db* {:valid-time after-all-events :tx-time after-all-events})
         entities (->> res (map :db/entity) set)]
     (is (contains? entities "user/alice"))
     (is (contains? entities "user/bob"))
@@ -123,8 +132,8 @@
 
 (deftest query-before-any-facts-returns-empty
   (let [res (db/query-as-of *db* {:entity     "user/alice"
-                                  :valid-time "2023-01-01"
-                                  :tx-time    "2024-12-31"})]
+                                  :valid-time before-any-facts
+                                  :tx-time    after-all-events})]
     (is (empty? res))))
 
 ;;; ── insert-facts! ───────────────────────────────────────────────────────────
@@ -144,8 +153,8 @@
   (let [tx-id (db/insert-facts! *db* [{:entity "user/eve" :attribute ":user/name"  :value "Eve"}
                                       {:entity "user/eve" :attribute ":user/email" :value "eve@example.com"}])
         res   (db/query-as-of *db* {:entity     "user/eve"
-                                    :valid-time "9999-12-31"
-                                    :tx-time    "9999-12-31"})]
+                                    :valid-time far-future
+                                    :tx-time    far-future})]
     (is (integer? tx-id))
     (is (= 2 (count res)))))
 
@@ -155,7 +164,7 @@
                                      :attribute ":user/name"
                                      :value     "Frank"}])
         res (db/query-as-of *db* {:entity     "user/frank"
-                                  :valid-time "9999-12-31"
-                                  :tx-time    "9999-12-31"})]
+                                  :valid-time far-future
+                                  :tx-time    far-future})]
     (is (= 1 (count res)))
     (is (= "Frank" (:db/value (first res))))))

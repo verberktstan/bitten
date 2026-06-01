@@ -7,7 +7,7 @@ Bitten is a bi-temporal, log-style database server written in **Babashka** (a sc
 ## Technology Stack
 
 - **Runtime**: [Babashka](https://babashka.org/) — GraalVM-native Clojure scripting. Use `bb` as the interpreter.
-- **Persistence**: SQLite via `babashka.pods` or `next.jdbc`-compatible pod.
+- **Persistence**: SQLite via `org.babashka/go-sqlite3` pod (version `0.3.13`). See the Babashka / SCI Gotchas section for the correct pod API.
 - **Networking**: TCP server using `babashka.nrepl` patterns or raw `java.net.ServerSocket`.
 - **Testing**: `babashka.test` or `clojure.test` (works under Babashka).
 
@@ -94,9 +94,31 @@ bb test                # run all tests
 echo '{:op :ping}' | nc localhost 5432   # smoke-test
 ```
 
+## Communicating Intent
+
+Prefer names that communicate *why* over names that are merely short. Brevity that obscures purpose is a bug, not a virtue.
+
+- **Test fixtures and constants**: give test data and time values descriptive names (`before-alice-renamed`, `after-all-events`) rather than leaving raw literals inline. A reader should understand what a value represents without cross-referencing the dataset comment.
+- **Intermediate bindings**: name `let` bindings after the concept they represent, not after their type or shape (`valid-tx-id`, not `id`).
+- This principle applies everywhere — function names, var names, parameter names, SQL aliases.
+
+## Babashka / SCI Gotchas
+
+Hard-won constraints to apply from the start, not rediscover mid-session.
+
+**Pod API — `org.babashka/go-sqlite3` (use version `0.3.13`+)**
+- The pod API is `(sqlite/execute! db [sql & params])` and `(sqlite/query db [sql & params])` — SQL and params are a **single vector**, not separate arguments. Passing `db sql params` as three separate args silently passes zero parameters to the query engine.
+- `:memory:` databases do not persist across pod calls; each `execute!` / `query` opens a fresh connection. Use a unique temp file per test (e.g. `(str "/tmp/bitten-test-" (System/nanoTime) ".db")`) and delete it in a `finally` block.
+- `BEGIN` / `COMMIT` transactions require a **persistent connection**. Use `(sqlite/get-connection path)` → run statements → `(sqlite/close-connection conn)`. Path-based calls use a new connection per call and will throw "no transaction is active" on `COMMIT`.
+- `migrate!` and other functions that take a db handle should accept both a plain path string and a map containing `:db-path` (or similar). Use a private `db->path` helper to normalise the input before passing it to the pod.
+
+**Babashka / SCI var behaviour**
+- `^:private` on a bare `def` is **broken in SCI** — the var appears `SciUnbound` at runtime even within the same namespace. Use plain `def` for namespace-level constants in test files; use `defn-` (which does work) for private helper functions.
+- When using `replace_all` on a string literal, the replacement will also hit any `def` that *defines* that literal, creating a self-referential binding. Scope replacements carefully or fix the definition site in a separate edit.
+
 ## What to Avoid
 
 - No speculative features — build only what the current task requires.
 - No defensive nil-handling for code paths that cannot produce nil.
 - No comments that restate what the code already says; only document *why* when non-obvious.
-- No mocking of SQLite in tests — use an in-memory SQLite database (`:memory:`) instead.
+- Do not use `:memory:` as a SQLite path in tests — it loses state between pod calls. Use temp files instead.
