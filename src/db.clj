@@ -68,6 +68,21 @@
   (let [v (clojure.edn/read-string s)]
     (if (keyword? v) v s)))
 
+(defn- select-ranked-facts [where-clause]
+  (str
+   "WITH ranked AS (
+      SELECT entity, attribute, value, retracted,
+      ROW_NUMBER() OVER (
+        PARTITION BY entity, attribute
+        ORDER BY valid_time DESC, tx_time DESC, id DESC
+      ) AS rn
+      FROM facts"
+   where-clause
+   ")
+    SELECT entity, attribute, value
+    FROM ranked
+    WHERE rn = 1 AND retracted = false"))
+
 (defn query-as-of
   "Bi-temporal point query. Returns a seq of {:db/entity :db/attribute :db/value}.
 
@@ -90,18 +105,7 @@
         where-clause (when (seq filters)
                        (str " WHERE " (str/join " AND " (map first filters))))
         params       (->> filters (mapcat second) vec)
-        sql          (str "WITH ranked AS (
-                             SELECT entity, attribute, value, retracted,
-                               ROW_NUMBER() OVER (
-                                 PARTITION BY entity, attribute
-                                 ORDER BY valid_time DESC, tx_time DESC, id DESC
-                               ) AS rn
-                             FROM facts"
-                          where-clause
-                          ")
-                           SELECT entity, attribute, value
-                           FROM ranked
-                           WHERE rn = 1 AND retracted = false")]
+        sql          (select-ranked-facts where-clause)]
     (->> (sqlite/query db (into [sql] params))
          (map (fn [row]
                 {:db/entity    (:entity row)
