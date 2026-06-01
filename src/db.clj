@@ -13,7 +13,7 @@
      valid_time TEXT    NOT NULL,
      tx_time    TEXT    NOT NULL,
      tx_id      INTEGER NOT NULL,
-     retracted  INTEGER NOT NULL DEFAULT 0
+     retracted  BOOLEAN NOT NULL DEFAULT false
    )")
 
 (defn migrate! [db]
@@ -28,11 +28,18 @@
       first
       :next_id))
 
+(def ->eav (juxt :entity :attribute :value))
+
+(defn- assert-fact
+  [fact]
+  (every? some? (->eav fact)))
+
 (defn insert-facts!
   "Appends facts to the log in a single transaction. Returns the assigned tx-id.
    Each fact map requires :entity, :attribute, :value.
    :valid-time is optional and defaults to the current wall-clock time."
   [db facts]
+  {:pre [(every? assert-fact facts)]}
   (let [tx-time (now-iso)
         conn    (sqlite/get-connection db)]
     (try
@@ -41,16 +48,16 @@
         (doseq [{:keys [entity attribute value valid-time]
                  :or   {valid-time tx-time}} facts]
           (sqlite/execute! conn
-            ["INSERT INTO facts (entity, attribute, value, valid_time, tx_time, tx_id)
+                           ["INSERT INTO facts (entity, attribute, value, valid_time, tx_time, tx_id)
               VALUES (?, ?, ?, ?, ?, ?)"
-             (str entity) (str attribute) (str value) valid-time tx-time tx-id]))
+                            (str entity) (str attribute) (str value) valid-time tx-time tx-id]))
         (sqlite/execute! conn ["COMMIT"])
         tx-id)
       (catch Exception e
         (try (sqlite/execute! conn ["ROLLBACK"]) (catch Exception _ nil))
         (throw e))
       (finally
-        (sqlite/close-connection conn)))))
+       (sqlite/close-connection conn)))))
 
 (defn query-as-of
   "Bi-temporal point query. Returns a seq of {:db/entity :db/attribute :db/value}.
@@ -77,7 +84,7 @@
                  ")
                   SELECT entity, attribute, value
                   FROM ranked
-                  WHERE rn = 1 AND retracted = 0")
+                  WHERE rn = 1 AND retracted = false")
         params (cond-> [tx-time valid-time]
                  entity (conj entity))]
     (->> (sqlite/query db (into [sql] params))

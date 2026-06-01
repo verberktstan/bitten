@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS facts (
   valid_time  TEXT    NOT NULL,  -- ISO-8601, the "business" time this fact is true
   tx_time     TEXT    NOT NULL,  -- ISO-8601, when this row was written (wall clock)
   tx_id       INTEGER NOT NULL,  -- monotonically increasing transaction counter
-  retracted   INTEGER NOT NULL DEFAULT 0  -- 1 = this fact has been logically retracted
+  retracted   BOOLEAN NOT NULL DEFAULT false  -- true = this fact has been logically retracted
 );
 ```
 
