@@ -43,8 +43,8 @@
                    :valid-time "2024-01-01" :tx-time "2024-01-01"
                    :tx-id 1 :retracted false})
   (insert-raw! db {:entity "user/alice" :attribute ":user/email" :value "a@example.com"
-                   :valid-time "2024-01-01" :tx-time "2024-01-01" :tx-id 1
-                   :retracted false})
+                   :valid-time "2024-01-01" :tx-time "2024-01-01"
+                   :tx-id 1 :retracted false})
   (insert-raw! db {:entity "user/bob"   :attribute ":user/name"  :value "Bob"
                    :valid-time "2024-01-01" :tx-time "2024-01-01"
                    :tx-id 1 :retracted false})
@@ -95,8 +95,7 @@
 (deftest basic-entity-lookup
   ;; alice at a time when only tx-1 facts exist
   (let [res (db/query-as-of *db* {:entity     "user/alice"
-                                  :valid-time before-alice-renamed
-                                  :tx-time    after-all-events})]
+                                  :valid-time before-alice-renamed})]
     (is (= 2 (count res)))
     (is (some #(= % {:db/entity "user/alice" :db/attribute :user/name  :db/value "Alice"})         res))
     (is (some #(= % {:db/entity "user/alice" :db/attribute :user/email :db/value "a@example.com"}) res))))
@@ -104,15 +103,13 @@
 (deftest name-changed-in-valid-time
   ;; querying after alice's new valid-time returns the updated name
   (let [res (db/query-as-of *db* {:entity     "user/alice"
-                                  :valid-time after-alice-renamed
-                                  :tx-time    after-all-events})]
+                                  :valid-time after-alice-renamed})]
     (is (= "Alicia" (name-of res "user/alice")))))
 
 (deftest query-before-name-change-valid-time
   ;; querying before alice's new valid-time still returns the old name
   (let [res (db/query-as-of *db* {:entity     "user/alice"
-                                  :valid-time before-alice-renamed
-                                  :tx-time    after-all-events})]
+                                  :valid-time before-alice-renamed})]
     (is (= "Alice" (name-of res "user/alice")))))
 
 (deftest retroactive-correction-before-known
@@ -125,20 +122,17 @@
 (deftest retroactive-correction-after-known
   ;; querying bob as of tx-time AFTER the correction was recorded → corrected value
   (let [res (db/query-as-of *db* {:entity     "user/bob"
-                                  :valid-time before-alice-renamed
-                                  :tx-time    after-all-events})]
+                                  :valid-time before-alice-renamed})]
     (is (= "Bob Smith" (name-of res "user/bob")))))
 
 (deftest retracted-fact-returns-empty
   ;; carol's name was retracted; entity should return no results
-  (let [res (db/query-as-of *db* {:entity     "user/carol"
-                                  :valid-time after-all-events
-                                  :tx-time    after-all-events})]
+  (let [res (db/query-as-of *db* {:entity "user/carol"})]
     (is (empty? res))))
 
 (deftest no-entity-filter-returns-all-entities
   ;; omitting :entity returns facts for every entity
-  (let [res      (db/query-as-of *db* {:valid-time after-all-events :tx-time after-all-events})
+  (let [res      (db/query-as-of *db* {})
         entities (->> res (map :db/entity) set)]
     (is (contains? entities "user/alice"))
     (is (contains? entities "user/bob"))
@@ -147,14 +141,13 @@
 
 (deftest query-before-any-facts-returns-empty
   (let [res (db/query-as-of *db* {:entity     "user/alice"
-                                  :valid-time before-any-facts
-                                  :tx-time    after-all-events})]
+                                  :valid-time before-any-facts})]
     (is (empty? res))))
 
 ;; query ;;
 
 (deftest query-returns-nested-entity-attribute-map
-  (let [result (db/query *db* {:valid-time after-all-events :tx-time after-all-events})]
+  (let [result (db/query *db* {})]
     (is (= "Alicia"        (get-in result ["user/alice" :user/name])))
     (is (= "a@example.com" (get-in result ["user/alice" :user/email])))
     (is (= "Bob Smith"     (get-in result ["user/bob"   :user/name])))
@@ -162,9 +155,7 @@
     (is (nil? (get result "user/carol")))))
 
 (deftest query-scoped-to-single-entity
-  (let [result (db/query *db* {:entity     "user/alice"
-                               :valid-time after-all-events
-                               :tx-time    after-all-events})]
+  (let [result (db/query *db* {:entity "user/alice"})]
     (is (= {"user/alice" {:user/name "Alicia" :user/email "a@example.com"}}
            result))))
 
@@ -184,9 +175,7 @@
 (deftest insert-facts-groups-batch-under-same-tx-id
   (let [tx-id (db/insert-facts! *db* [{:entity "user/eve" :attribute ":user/name"  :value "Eve"}
                                       {:entity "user/eve" :attribute ":user/email" :value "eve@example.com"}])
-        res   (db/query-as-of *db* {:entity     "user/eve"
-                                    :valid-time far-future
-                                    :tx-time    far-future})]
+        res   (db/query-as-of *db* {:entity "user/eve"})]
     (is (integer? tx-id))
     (is (= 2 (count res)))))
 
@@ -195,8 +184,6 @@
   (let [_   (db/insert-facts! *db* [{:entity    "user/frank"
                                      :attribute ":user/name"
                                      :value     "Frank"}])
-        res (db/query-as-of *db* {:entity     "user/frank"
-                                  :valid-time far-future
-                                  :tx-time    far-future})]
+        res (db/query-as-of *db* {:entity "user/frank"})]
     (is (= 1 (count res)))
     (is (= "Frank" (:db/value (first res))))))

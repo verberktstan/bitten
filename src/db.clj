@@ -1,5 +1,6 @@
 (ns db
-  (:require [babashka.pods :as pods]))
+  (:require [babashka.pods :as pods]
+            [clojure.string :as str]))
 
 (pods/load-pod 'org.babashka/go-sqlite3 "0.3.13")
 (require '[pod.babashka.go-sqlite3 :as sqlite])
@@ -70,31 +71,35 @@
 (defn query-as-of
   "Bi-temporal point query. Returns a seq of {:db/entity :db/attribute :db/value}.
 
-   opts:
-     :entity     — optional; omit to return all entities
-     :valid-time — the valid-time point to query (ISO-8601 string)
-     :tx-time    — the transaction-time point to query (ISO-8601 string)
+   opts (all optional):
+     :entity     — restrict to a single entity
+     :valid-time — only consider facts valid at or before this ISO-8601 string;
+                   omit to ignore the valid-time axis entirely
+     :tx-time    — only consider facts recorded at or before this ISO-8601 string;
+                   omit to ignore the transaction-time axis entirely
 
-   For each (entity, attribute) pair considers only facts recorded at or before
-   :tx-time and valid at or before :valid-time, then picks the most recent one
+   For each (entity, attribute) pair picks the most recent surviving fact
    (by valid_time DESC, tx_time DESC, id DESC). Suppresses retracted facts."
   [db {:keys [entity valid-time tx-time]}]
-  (let [entity-clause (when entity " AND entity = ?")
-        sql (str "WITH ranked AS (
-                    SELECT entity, attribute, value, retracted,
-                      ROW_NUMBER() OVER (
-                        PARTITION BY entity, attribute
-                        ORDER BY valid_time DESC, tx_time DESC, id DESC
-                      ) AS rn
-                    FROM facts
-                    WHERE tx_time <= ? AND valid_time <= ?"
-                 entity-clause
-                 ")
-                  SELECT entity, attribute, value
-                  FROM ranked
-                  WHERE rn = 1 AND retracted = false")
-        params (cond-> [tx-time valid-time]
-                 entity (conj entity))]
+  (let [filters      (cond-> []
+                       tx-time    (conj ["tx_time <= ?" tx-time])
+                       valid-time (conj ["valid_time <= ?" valid-time])
+                       entity     (conj ["entity = ?" entity]))
+        where-clause (when (seq filters)
+                       (str " WHERE " (str/join " AND " (map first filters))))
+        params       (mapv second filters)
+        sql          (str "WITH ranked AS (
+                             SELECT entity, attribute, value, retracted,
+                               ROW_NUMBER() OVER (
+                                 PARTITION BY entity, attribute
+                                 ORDER BY valid_time DESC, tx_time DESC, id DESC
+                               ) AS rn
+                             FROM facts"
+                          where-clause
+                          ")
+                           SELECT entity, attribute, value
+                           FROM ranked
+                           WHERE rn = 1 AND retracted = false")]
     (->> (sqlite/query db (into [sql] params))
          (map (fn [row]
                 {:db/entity    (:entity row)
