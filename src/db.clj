@@ -29,10 +29,14 @@
       :next_id))
 
 (def ->eav (juxt :entity :attribute :value))
+(def ->full-eav (juxt :entity :attribute :value :valid-time :tx-time :tx-id :retracted))
 
-(defn- assert-fact
-  [fact]
-  (every? some? (->eav fact)))
+(defn assert-fact
+  ([fact]
+   (assert-fact fact nil))
+  ([fact full?]
+   (let [convert-fact (if full? ->full-eav ->eav)]
+     (every? some? (convert-fact fact)))))
 
 (defn insert-facts!
   "Appends facts to the log in a single transaction. Returns the assigned tx-id.
@@ -57,7 +61,7 @@
         (try (sqlite/execute! conn ["ROLLBACK"]) (catch Exception _ nil))
         (throw e))
       (finally
-       (sqlite/close-connection conn)))))
+        (sqlite/close-connection conn)))))
 
 (defn query-as-of
   "Bi-temporal point query. Returns a seq of {:db/entity :db/attribute :db/value}.

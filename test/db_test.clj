@@ -13,7 +13,8 @@
   (let [path (str "/tmp/bitten-test-" (System/nanoTime) ".db")]
     (-> path db/migrate! (assoc :db-path path))))
 
-(defn- insert-raw! [{:keys [db entity attribute value valid-time tx-time tx-id retracted]}]
+(defn- insert-raw! [db {:keys [entity attribute value valid-time tx-time tx-id retracted] :as fact}]
+  {:pre [(db/assert-fact fact :full)]}
   (sqlite/execute! db
     ["INSERT INTO facts (entity, attribute, value, valid_time, tx_time, tx_id, retracted)
       VALUES (?, ?, ?, ?, ?, ?, ?)"
@@ -38,13 +39,27 @@
 ;;;   user/carol  :user/name   "Carol"          valid 2024-01-01  retracted=1
 
 (defn- seed-db! [db]
-  (insert-raw! {:db db :entity "user/alice" :attribute ":user/name"  :value "Alice"         :valid-time "2024-01-01" :tx-time "2024-01-01" :tx-id 1 :retracted false})
-  (insert-raw! {:db db :entity "user/alice" :attribute ":user/email" :value "a@example.com" :valid-time "2024-01-01" :tx-time "2024-01-01" :tx-id 1 :retracted false})
-  (insert-raw! {:db db :entity "user/bob"   :attribute ":user/name"  :value "Bob"           :valid-time "2024-01-01" :tx-time "2024-01-01" :tx-id 1 :retracted false})
-  (insert-raw! {:db db :entity "user/carol" :attribute ":user/name"  :value "Carol"         :valid-time "2024-01-01" :tx-time "2024-01-01" :tx-id 1 :retracted false})
-  (insert-raw! {:db db :entity "user/alice" :attribute ":user/name"  :value "Alicia"        :valid-time "2024-06-01" :tx-time "2024-06-01" :tx-id 2 :retracted false})
-  (insert-raw! {:db db :entity "user/bob"   :attribute ":user/name"  :value "Bob Smith"     :valid-time "2024-01-01" :tx-time "2024-09-01" :tx-id 3 :retracted false})
-  (insert-raw! {:db db :entity "user/carol" :attribute ":user/name"  :value "Carol"         :valid-time "2024-01-01" :tx-time "2024-11-01" :tx-id 4 :retracted true}))
+  (insert-raw! db {:entity "user/alice" :attribute ":user/name"  :value "Alice"
+                   :valid-time "2024-01-01" :tx-time "2024-01-01"
+                   :tx-id 1 :retracted false})
+  (insert-raw! db {:entity "user/alice" :attribute ":user/email" :value "a@example.com"
+                   :valid-time "2024-01-01" :tx-time "2024-01-01" :tx-id 1
+                   :retracted false})
+  (insert-raw! db {:entity "user/bob"   :attribute ":user/name"  :value "Bob"
+                   :valid-time "2024-01-01" :tx-time "2024-01-01"
+                   :tx-id 1 :retracted false})
+  (insert-raw! db {:entity "user/carol" :attribute ":user/name"  :value "Carol"
+                   :valid-time "2024-01-01" :tx-time "2024-01-01"
+                   :tx-id 1 :retracted false})
+  (insert-raw! db {:entity "user/alice" :attribute ":user/name"  :value "Alicia"
+                   :valid-time "2024-06-01" :tx-time "2024-06-01"
+                   :tx-id 2 :retracted false})
+  (insert-raw! db {:entity "user/bob"   :attribute ":user/name"  :value "Bob Smith"
+                   :valid-time "2024-01-01" :tx-time "2024-09-01"
+                   :tx-id 3 :retracted false})
+  (insert-raw! db {:entity "user/carol" :attribute ":user/name"  :value "Carol"
+                   :valid-time "2024-01-01" :tx-time "2024-11-01"
+                   :tx-id 4 :retracted true}))
 
 (defn- name-of [results entity]
   (->> results
