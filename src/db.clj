@@ -72,7 +72,7 @@
   "Bi-temporal point query. Returns a seq of {:db/entity :db/attribute :db/value}.
 
    opts (all optional):
-     :entity     — restrict to a single entity
+     :entities   — set of entity strings to restrict results; omit for all entities
      :valid-time — only consider facts valid at or before this ISO-8601 string;
                    omit to ignore the valid-time axis entirely
      :tx-time    — only consider facts recorded at or before this ISO-8601 string;
@@ -80,14 +80,16 @@
 
    For each (entity, attribute) pair picks the most recent surviving fact
    (by valid_time DESC, tx_time DESC, id DESC). Suppresses retracted facts."
-  [db {:keys [entity valid-time tx-time]}]
-  (let [filters      (cond-> []
-                       tx-time    (conj ["tx_time <= ?" tx-time])
-                       valid-time (conj ["valid_time <= ?" valid-time])
-                       entity     (conj ["entity = ?" entity]))
+  [db {:keys [entities valid-time tx-time]}]
+  (let [qmarks       (->> "?" (repeat (count entities)) (str/join ", "))
+        filters      (cond-> []
+                       tx-time          (conj ["tx_time <= ?" [tx-time]])
+                       valid-time       (conj ["valid_time <= ?" [valid-time]])
+                       (seq entities)   (conj [(str "entity IN (" qmarks ")")
+                                               (vec entities)]))
         where-clause (when (seq filters)
                        (str " WHERE " (str/join " AND " (map first filters))))
-        params       (mapv second filters)
+        params       (->> filters (mapcat second) vec)
         sql          (str "WITH ranked AS (
                              SELECT entity, attribute, value, retracted,
                                ROW_NUMBER() OVER (

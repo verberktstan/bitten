@@ -94,7 +94,7 @@
 
 (deftest basic-entity-lookup
   ;; alice at a time when only tx-1 facts exist
-  (let [res (db/query-as-of *db* {:entity     "user/alice"
+  (let [res (db/query-as-of *db* {:entities   #{"user/alice"}
                                   :valid-time before-alice-renamed})]
     (is (= 2 (count res)))
     (is (some #(= % {:db/entity "user/alice" :db/attribute :user/name  :db/value "Alice"})         res))
@@ -102,32 +102,32 @@
 
 (deftest name-changed-in-valid-time
   ;; querying after alice's new valid-time returns the updated name
-  (let [res (db/query-as-of *db* {:entity     "user/alice"
+  (let [res (db/query-as-of *db* {:entities   #{"user/alice"}
                                   :valid-time after-alice-renamed})]
     (is (= "Alicia" (name-of res "user/alice")))))
 
 (deftest query-before-name-change-valid-time
   ;; querying before alice's new valid-time still returns the old name
-  (let [res (db/query-as-of *db* {:entity     "user/alice"
+  (let [res (db/query-as-of *db* {:entities   #{"user/alice"}
                                   :valid-time before-alice-renamed})]
     (is (= "Alice" (name-of res "user/alice")))))
 
 (deftest retroactive-correction-before-known
   ;; querying bob as of tx-time BEFORE the correction was recorded → original value
-  (let [res (db/query-as-of *db* {:entity     "user/bob"
+  (let [res (db/query-as-of *db* {:entities   #{"user/bob"}
                                   :valid-time before-alice-renamed
                                   :tx-time    before-bob-corrected})]
     (is (= "Bob" (name-of res "user/bob")))))
 
 (deftest retroactive-correction-after-known
   ;; querying bob as of tx-time AFTER the correction was recorded → corrected value
-  (let [res (db/query-as-of *db* {:entity     "user/bob"
+  (let [res (db/query-as-of *db* {:entities   #{"user/bob"}
                                   :valid-time before-alice-renamed})]
     (is (= "Bob Smith" (name-of res "user/bob")))))
 
 (deftest retracted-fact-returns-empty
   ;; carol's name was retracted; entity should return no results
-  (let [res (db/query-as-of *db* {:entity "user/carol"})]
+  (let [res (db/query-as-of *db* {:entities #{"user/carol"}})]
     (is (empty? res))))
 
 (deftest no-entity-filter-returns-all-entities
@@ -140,7 +140,7 @@
     (is (not (contains? entities "user/carol")))))
 
 (deftest query-before-any-facts-returns-empty
-  (let [res (db/query-as-of *db* {:entity     "user/alice"
+  (let [res (db/query-as-of *db* {:entities   #{"user/alice"}
                                   :valid-time before-any-facts})]
     (is (empty? res))))
 
@@ -155,9 +155,15 @@
     (is (nil? (get result "user/carol")))))
 
 (deftest query-scoped-to-single-entity
-  (let [result (db/query *db* {:entity "user/alice"})]
+  (let [result (db/query *db* {:entities #{"user/alice"}})]
     (is (= {"user/alice" {:user/name "Alicia" :user/email "a@example.com"}}
            result))))
+
+(deftest query-scoped-to-multiple-entities
+  (let [result (db/query *db* {:entities #{"user/alice" "user/bob"}})]
+    (is (= #{"user/alice" "user/bob"} (set (keys result))))
+    (is (= "Alicia"    (get-in result ["user/alice" :user/name])))
+    (is (= "Bob Smith" (get-in result ["user/bob"   :user/name])))))
 
 ;; insert-facts! ;;
 
@@ -175,7 +181,7 @@
 (deftest insert-facts-groups-batch-under-same-tx-id
   (let [tx-id (db/insert-facts! *db* [{:entity "user/eve" :attribute ":user/name"  :value "Eve"}
                                       {:entity "user/eve" :attribute ":user/email" :value "eve@example.com"}])
-        res   (db/query-as-of *db* {:entity "user/eve"})]
+        res   (db/query-as-of *db* {:entities #{"user/eve"}})]
     (is (integer? tx-id))
     (is (= 2 (count res)))))
 
@@ -184,6 +190,6 @@
   (let [_   (db/insert-facts! *db* [{:entity    "user/frank"
                                      :attribute ":user/name"
                                      :value     "Frank"}])
-        res (db/query-as-of *db* {:entity "user/frank"})]
+        res (db/query-as-of *db* {:entities #{"user/frank"}})]
     (is (= 1 (count res)))
     (is (= "Frank" (:db/value (first res))))))
