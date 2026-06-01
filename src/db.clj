@@ -127,6 +127,24 @@
 (defn- index-by-entity [records]
   (into {} (map (fn [r] [(:db/entity r) (dissoc r :db/entity)]) records)))
 
+(defn diff->facts
+  "Given a diff map and context, returns {:changed [...] :retracted [...]}.
+
+   Expects keys: :from-db, :from-record (from clojure.data/diff), :entity,
+   :missing-keys (:ignore or :retract)."
+  [{:keys [from-db from-record entity missing-keys]}]
+  {:changed   (map (fn [[k v]] {:entity entity :attribute k :value v})
+                   from-record)
+   :retracted (when (= missing-keys :retract)
+                ;; from-db holds both changed and gone keys; subtract the changed
+                ;; ones (present in from-record) to isolate keys that vanished entirely.
+                (->> (apply dissoc from-db (keys from-record))
+                     (map (fn [[k v]]
+                            {:entity    entity
+                             :attribute k
+                             :value     v
+                             :retracted true}))))})
+
 (defn upsert!
   "Applies data-records to the db, writing only changed key/value pairs as facts.
    Each record must contain :db/entity; remaining keys are attribute/value pairs.
@@ -141,21 +159,14 @@
    (let [entities    (into #{} (map :db/entity records))
          current-idx (->> (query db {:entities entities}) index-by-entity)
          facts       (for [record  records
-                           :let    [entity    (:db/entity record)
-                                    incoming  (dissoc record :db/entity)
-                                    existing  (get current-idx entity {})
-                                    changed   (into [] (remove (fn [[k v]] (= v (get existing k)))) incoming)
-                                    retracted (when (= missing-keys :retract)
-                                                (->> (keys existing)
-                                                     (remove #(contains? incoming %))
-                                                     (map (fn [k]
-                                                            {:entity    entity
-                                                             :attribute k
-                                                             :value     (get existing k)
-                                                             :retracted true}))))]]
-                      (concat
-                       (map (fn [[k v]] {:entity entity :attribute k :value v}) changed)
-                       retracted))
+                           :let    [entity              (:db/entity record)
+                                    incoming            (dissoc record :db/entity)
+                                    existing            (get current-idx entity {})
+                                    diff                (-> (zipmap [:from-db :from-record]
+                                                                    (clojure.data/diff existing incoming))
+                                                            (assoc :entity entity :missing-keys missing-keys))
+                                    {:keys [changed retracted]} (diff->facts diff)]]
+                      (concat changed retracted))
          all-facts   (into [] cat facts)]
      (when (seq all-facts)
        (insert-facts! db all-facts)))))

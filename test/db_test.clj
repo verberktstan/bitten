@@ -207,6 +207,40 @@
                             :retracted true}])
   (is (nil? (:user/email (entity-record *db* "user/alice")))))
 
+;; diff->facts ;;
+
+(deftest diff->facts-happy-path-changed-and-retracted
+  ;; Core invariant: a changed key appears in :changed with the NEW value;
+  ;; a gone key appears in :retracted — but the changed key does NOT,
+  ;; even though clojure.data/diff puts it in both partitions.
+  (let [{:keys [changed retracted]}
+        (db/diff->facts {:from-db     {:user/name "Alice" :user/email "a@example.com"}
+                         :from-record {:user/name "Alicia"}
+                         :entity      "user/alice"
+                         :missing-keys :retract})]
+    (is (= [{:entity "user/alice" :attribute :user/name :value "Alicia"}]
+           (vec changed)))
+    (is (= [{:entity "user/alice" :attribute :user/email :value "a@example.com" :retracted true}]
+           (vec retracted)))))
+
+(deftest diff->facts-no-op-returns-empty
+  ;; When both diff partitions are nil nothing is produced.
+  (let [{:keys [changed retracted]}
+        (db/diff->facts {:from-db nil :from-record nil
+                         :entity "user/alice" :missing-keys :ignore})]
+    (is (empty? changed))
+    (is (nil? retracted))))
+
+(deftest diff->facts-ignore-does-not-retract-gone-keys
+  ;; :ignore mode suppresses retractions regardless of what is in from-db.
+  (let [{:keys [changed retracted]}
+        (db/diff->facts {:from-db     {:user/email "a@example.com"}
+                         :from-record nil
+                         :entity      "user/alice"
+                         :missing-keys :ignore})]
+    (is (empty? changed))
+    (is (nil? retracted))))
+
 ;; upsert! ;;
 
 (deftest upsert-no-op-returns-nil

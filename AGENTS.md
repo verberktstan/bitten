@@ -24,6 +24,7 @@ Every feature follows this mandatory sequence:
 4. **Verify** — run `bb test` (or the project's test runner) and confirm all tests are green. For TCP/server changes, also do a manual smoke-test with `nc` or equivalent.
 
 Never skip or reorder these steps.
+Present benefits and trade-offs to me when we have to choose between different approaches, implementations or concepts, before actual implementation is done.
 
 ## Idiomatic Clojure
 
@@ -130,6 +131,57 @@ Hard-won constraints to apply from the start, not rediscover mid-session.
 | `volatile!` mutable accumulator | Yes | Marginally faster in tight loops (avoids per-step closure allocation); the underlying persistent map operations are unchanged. Trades purity for a micro-optimisation that is invisible against the SQLite roundtrip latency. |
 
 **Decision: keep plain `reduce` with immutable `{}`.** The bottleneck is the SQL pod call, not the Clojure fold. Revisit only if profiling shows the reduction itself as a hotspot for result sets in the hundreds of thousands.
+
+## `upsert!` — Design and Implementation
+
+### Data shapes
+
+Input — a sequence of flat maps where `:db/entity` identifies the record:
+
+```clojure
+[{:db/entity "user/alice" :user/name "Alice" :user/email "a@example.com"}
+ {:db/entity "user/bob"   :user/name "Bob"}]
+```
+
+`query` returns the same flat-map shape (`:db/entity` plus attribute keywords as keys), making the roundtrip symmetrical: `query` output can be modified and fed directly back into `upsert!`.
+
+### Algorithm
+
+```
+1. Collect all :db/entity values → set of entities
+2. query db {:entities entities} → current state as flat maps
+3. index-by-entity → {"user/alice" {:user/name "Alicia" …}, …}
+4. For each incoming record:
+   a. incoming  = (dissoc record :db/entity)
+   b. existing  = (get current-idx entity {})
+   c. diff      = (zipmap [:from-db :from-record]
+                           (clojure.data/diff existing incoming))
+                  then assoc :entity and :missing-keys into the map
+   d. diff->facts → {:changed [...] :retracted [...]}
+5. Flatten all per-record facts with (into [] cat …)
+6. (when (seq all-facts) (insert-facts! db all-facts))
+   → returns tx-id or nil for a pure no-op
+```
+
+### `diff->facts`
+
+`clojure.data/diff` partitions the diff into three maps: `[only-in-a only-in-b same]`. With `a = existing` and `b = incoming`:
+
+- **`:from-record`** (`only-in-b`) — attributes that are new or have a changed value → become assertion facts
+- **`:from-db`** (`only-in-a`) — attributes that existed but are changed or gone. Changed values appear in *both* `from-db` and `from-record`; `(apply dissoc from-db (keys from-record))` subtracts the updated keys, leaving only attributes that vanished entirely → become retraction facts when `:missing-keys :retract`
+
+`zipmap [:from-db :from-record]` over the diff output drops the `same` partition and names the two partitions, producing a map that is then passed directly to `diff->facts`.
+
+### `:missing-keys` option
+
+| Value | Behaviour |
+|---|---|
+| `:ignore` (default) | Absent attributes are left untouched in the db |
+| `:retract` | Attributes present in the db but absent from the incoming record are retracted (new row with `retracted = true`) |
+
+### Retractions in `insert-facts!`
+
+`insert-facts!` accepts an optional `:retracted` key (default `false`) in each fact map. When `true`, the row is inserted with `retracted = true`, making that attribute invisible to subsequent queries for that (entity, attribute) pair at or after the retraction's `tx_time`.
 
 ## What to Avoid
 
