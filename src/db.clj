@@ -83,6 +83,11 @@
     FROM ranked
     WHERE rn = 1 AND retracted = false"))
 
+(defn- row->datom [row]
+  {:db/entity    (:entity row)
+   :db/attribute (-> row :attribute parse-attr)
+   :db/value     (:value row)})
+
 (defn query-as-of
   "Bi-temporal point query. Returns a seq of {:db/entity :db/attribute :db/value}.
 
@@ -96,26 +101,24 @@
    For each (entity, attribute) pair picks the most recent surviving fact
    (by valid_time DESC, tx_time DESC, id DESC). Suppresses retracted facts."
   [db {:keys [entities valid-time tx-time]}]
-  (let [qmarks       (->> "?" (repeat (count entities)) (str/join ", "))
+  (let [n-entities   (when (seq entities) (count entities))
+        qmarks       (when n-entities
+                       (->> "?" (repeat n-entities) (str/join ", ")))
         filters      (cond-> []
-                       tx-time          (conj ["tx_time <= ?" [tx-time]])
-                       valid-time       (conj ["valid_time <= ?" [valid-time]])
-                       (seq entities)   (conj [(str "entity IN (" qmarks ")")
-                                               (vec entities)]))
+                       tx-time    (conj ["tx_time <= ?" [tx-time]])
+                       valid-time (conj ["valid_time <= ?" [valid-time]])
+                       n-entities (conj [(str "entity IN (" qmarks ")") (vec entities)]))
         where-clause (when (seq filters)
                        (str " WHERE " (str/join " AND " (map first filters))))
         params       (->> filters (mapcat second) vec)
         sql          (select-ranked-facts where-clause)]
     (->> (sqlite/query db (into [sql] params))
-         (map (fn [row]
-                {:db/entity    (:entity row)
-                 :db/attribute (-> row :attribute parse-attr)
-                 :db/value     (:value row)})))))
+         (map row->datom))))
 
 (defn query
   "Returns query-as-of results as a nested map of {entity {attribute value}}."
   [db opts]
-  (reduce (fn [acc {:db/keys [entity attribute value]}]
+  (reduce (fn query* [acc {:db/keys [entity attribute value]}]
             (update acc entity assoc attribute value))
           {}
           (query-as-of db opts)))
