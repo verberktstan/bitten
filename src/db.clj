@@ -63,6 +63,10 @@
       (finally
         (sqlite/close-connection conn)))))
 
+(defn- parse-attr [s]
+  (let [v (clojure.edn/read-string s)]
+    (if (keyword? v) v s)))
+
 (defn query-as-of
   "Bi-temporal point query. Returns a seq of {:db/entity :db/attribute :db/value}.
 
@@ -94,5 +98,13 @@
     (->> (sqlite/query db (into [sql] params))
          (map (fn [row]
                 {:db/entity    (:entity row)
-                 :db/attribute (:attribute row)
+                 :db/attribute (-> row :attribute parse-attr)
                  :db/value     (:value row)})))))
+
+(defn query
+  "Returns query-as-of results as a nested map of {entity {attribute value}}."
+  [db opts]
+  (reduce (fn [acc {:db/keys [entity attribute value]}]
+            (update acc entity assoc attribute value))
+          {}
+          (query-as-of db opts)))

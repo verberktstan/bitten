@@ -64,7 +64,7 @@
 (defn- name-of [results entity]
   (->> results
        (filter #(and (= entity (:db/entity %))
-                     (= ":user/name" (:db/attribute %))))
+                     (= :user/name (:db/attribute %))))
        first
        :db/value))
 
@@ -98,8 +98,8 @@
                                   :valid-time before-alice-renamed
                                   :tx-time    after-all-events})]
     (is (= 2 (count res)))
-    (is (some #(= % {:db/entity "user/alice" :db/attribute ":user/name"  :db/value "Alice"})         res))
-    (is (some #(= % {:db/entity "user/alice" :db/attribute ":user/email" :db/value "a@example.com"}) res))))
+    (is (some #(= % {:db/entity "user/alice" :db/attribute :user/name  :db/value "Alice"})         res))
+    (is (some #(= % {:db/entity "user/alice" :db/attribute :user/email :db/value "a@example.com"}) res))))
 
 (deftest name-changed-in-valid-time
   ;; querying after alice's new valid-time returns the updated name
@@ -151,7 +151,24 @@
                                   :tx-time    after-all-events})]
     (is (empty? res))))
 
-;;; ── insert-facts! ───────────────────────────────────────────────────────────
+;; query ;;
+
+(deftest query-returns-nested-entity-attribute-map
+  (let [result (db/query *db* {:valid-time after-all-events :tx-time after-all-events})]
+    (is (= "Alicia"        (get-in result ["user/alice" :user/name])))
+    (is (= "a@example.com" (get-in result ["user/alice" :user/email])))
+    (is (= "Bob Smith"     (get-in result ["user/bob"   :user/name])))
+    ;; carol is retracted — must not appear
+    (is (nil? (get result "user/carol")))))
+
+(deftest query-scoped-to-single-entity
+  (let [result (db/query *db* {:entity     "user/alice"
+                               :valid-time after-all-events
+                               :tx-time    after-all-events})]
+    (is (= {"user/alice" {:user/name "Alicia" :user/email "a@example.com"}}
+           result))))
+
+;; insert-facts! ;;
 
 (deftest insert-facts-increments-tx-id
   ;; db is pre-seeded with tx_ids 1–4; new inserts must continue the sequence
