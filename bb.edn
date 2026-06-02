@@ -1,7 +1,17 @@
 {:paths ["src" "test"]
  :pods  {org.babashka/go-sqlite3 {:version "0.3.13"}}
  :tasks
- {test {:doc  "Run all tests"
-        :task (do (require 'db-test 'server-test 'protocol-test)
-                  (let [{:keys [fail error]} (clojure.test/run-tests 'db-test 'server-test 'protocol-test)]
-                    (System/exit (+ fail error))))}}}
+ {test  {:doc  "Run all tests"
+         :task (do (require 'db-test 'server-test 'protocol-test)
+                   (let [{:keys [fail error]} (clojure.test/run-tests 'db-test 'server-test 'protocol-test)]
+                     (System/exit (+ fail error))))}
+
+  start {:doc      "Start the Bitten server (PORT and DB_PATH env vars optional)"
+         :requires ([server :as server] [sqlite :as sqlite] [storage :as storage])
+         :task     (let [port    (parse-long (or (System/getenv "PORT") "5432"))
+                         db-path (or (System/getenv "DB_PATH") "bitten.db")
+                         backend (sqlite/->SqliteBackend db-path)]
+                     (storage/migrate! backend)
+                     (server/start-server! port (server/make-edn-handler backend))
+                     (println (str "Bitten listening on port " port " (db: " db-path ")"))
+                     (deref (promise)))}}}
