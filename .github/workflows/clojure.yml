@@ -13,5 +13,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - uses: DeLaGuardo/setup-clojure@main
+      with:
+        bb: '1.12.217'
     - name: Run tests
       run: bb test
