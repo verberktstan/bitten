@@ -6,8 +6,8 @@
 
 Some databases record what is true *right now*. Bitten records:
 
-- **Valid time** — when a fact was true in the real world (e.g. a contract started on 1 January, even if you didn't enter it until March).
-- **Transaction time** — when the fact was written into the database.
+- **Valid time** - when a fact was true in the real world (e.g. a contract started on 1 January, even if you didn't enter it until March).
+- **Transaction time** - when the fact was written into the database.
 
 This means you can ask questions like *"what did we know about user Alice on 1 June, as of the snapshot we had in September?"* — and get a deterministic answer even after retroactive corrections have been applied.
 
@@ -22,11 +22,11 @@ To be extended with: a TCP server & EDN over the wire
 
 ## Stack
 
-- **[Babashka](https://babashka.org/)** — GraalVM-native Clojure scripting; fast startup, no JVM warm-up.
-- **SQLite** via the `org.babashka/go-sqlite3` pod — embedded, zero-infrastructure persistence.
+- **[Babashka](https://babashka.org/)** - GraalVM-native Clojure scripting; fast startup, no JVM warm-up.
+- **SQLite** via the `org.babashka/go-sqlite3` pod - embedded, zero-infrastructure persistence.
 
 Not yet implemented;
-- **EDN over TCP** — simple line-delimited protocol; any EDN-capable client can talk to the server.
+- **EDN over TCP** - simple line-delimited protocol; any EDN-capable client can talk to the server.
 
 ## Developing
 
