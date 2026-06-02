@@ -157,6 +157,30 @@ Hard-won constraints to apply from the start, not rediscover mid-session.
 
 **Decision: keep plain `reduce` with immutable `{}`.** The bottleneck is the SQL pod call, not the Clojure fold. Revisit only if profiling shows the reduction itself as a hotspot for result sets in the hundreds of thousands.
 
+## `retract!` — Design and Implementation
+
+### What it does
+
+`retract!` takes a backend and a sequence of entity ID strings. For each entity that currently has live (non-retracted) facts, it inserts one retraction row per `(attribute, value)` pair, making the whole entity invisible to subsequent queries. Entities that do not exist or are already fully retracted are silently skipped.
+
+### Algorithm
+
+```
+1. (query backend {:entities (set entity-ids)}) → live flat maps (already excludes retracted)
+2. For each record, for each [attr val] in (dissoc record :db/entity):
+     {:entity e :attribute attr :value val :retracted true}
+3. (when (seq all-facts) (storage/insert-facts! backend all-facts))
+   → tx-id or nil for no-op
+```
+
+### Edge cases
+
+| Situation | Behaviour |
+|---|---|
+| Entity not in DB | `query` returns nothing → nil |
+| Already fully retracted | `query` returns nothing → nil |
+| Multiple entities | all handled in one `insert-facts!` call |
+
 ## `upsert!` — Design and Implementation
 
 ### Data shapes

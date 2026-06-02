@@ -32,6 +32,14 @@ Not yet implemented;
 
 TODO
 
+### Logic layer (`src/db.clj`)
+
+| Function | Description |
+|---|---|
+| `query` | Returns live facts as a seq of flat maps, each with `:db/entity`. |
+| `upsert!` | Writes only the attributes that changed; optionally retracts attributes absent from the incoming record (`:missing-keys :retract`). |
+| `retract!` | Retracts all live facts for a seq of entity IDs. Inserts one retraction row per `(entity, attribute, value)` triple. Entities that are already retracted or do not exist are silently skipped. Returns the tx-id, or `nil` for a no-op. |
+
 Storage is abstracted behind an `IStorage` protocol (`src/storage.clj`). The SQLite implementation lives in `src/sqlite.clj`. To add a new backend, implement the three-method protocol in a new file — no changes to `src/db.clj` or the server are needed.
 
 ## Testing
