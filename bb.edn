@@ -2,6 +2,6 @@
  :pods  {org.babashka/go-sqlite3 {:version "0.3.13"}}
  :tasks
  {test {:doc  "Run all tests"
-        :task (do (require 'db-test)
-                  (let [{:keys [fail error]} (clojure.test/run-tests 'db-test)]
+        :task (do (require 'db-test 'server-test)
+                  (let [{:keys [fail error]} (clojure.test/run-tests 'db-test 'server-test)]
                     (System/exit (+ fail error))))}}}

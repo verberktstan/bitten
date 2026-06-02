@@ -9,7 +9,7 @@
 (pods/load-pod 'org.babashka/go-sqlite3 "0.3.13")
 (require '[pod.babashka.go-sqlite3 :as sql-pod])
 
-;; helpers ;;
+;; Helpers ;;
 
 (defn- fresh-db []
   (let [path    (str "/tmp/bitten-test-" (System/nanoTime) ".db")
