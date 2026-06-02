@@ -41,3 +41,9 @@ bb test
 ```
 
 Tests use real SQLite temp files (one per test, cleaned up in a `finally` block). There is no mocking of the storage layer.
+
+## License
+
+Copyright © 2026 Stan Verberkt
+
+Distributed under the EPL License. See LICENSE.
