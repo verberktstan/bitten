@@ -286,3 +286,29 @@
     (is (integer? tx-id))
     (is (= "Alicia V2" (:user/name (entity-record *db* "user/alice"))))
     (is (= "Bobby"     (:user/name (entity-record *db* "user/bob"))))))
+
+;; retract! ;;
+
+(deftest retract-entity-removes-all-live-attributes
+  ;; alice has :user/name and :user/email; both are gone after retraction
+  (db/retract! *db* ["user/alice"])
+  (is (nil? (entity-record *db* "user/alice"))))
+
+(deftest retract-nonexistent-entity-is-a-no-op
+  ;; entity never written → query returns nothing → nil, no error
+  (is (nil? (db/retract! *db* ["user/nobody"]))))
+
+(deftest retract-already-retracted-entity-is-a-no-op
+  ;; carol is fully retracted in seed data; retract! must not crash or write new rows
+  (is (nil? (db/retract! *db* ["user/carol"]))))
+
+(deftest retract-multiple-entities
+  ;; both alice and bob are removed in one call
+  (db/retract! *db* ["user/alice" "user/bob"])
+  (is (nil? (entity-record *db* "user/alice")))
+  (is (nil? (entity-record *db* "user/bob"))))
+
+(deftest retract-preserves-unretracted-entities
+  ;; retracting alice must leave bob's facts intact
+  (db/retract! *db* ["user/alice"])
+  (is (some? (entity-record *db* "user/bob"))))

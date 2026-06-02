@@ -66,3 +66,17 @@
          all-facts   (into [] cat facts)]
      (when (seq all-facts)
        (storage/insert-facts! backend all-facts)))))
+
+(defn retract!
+  "Retracts all live facts for each entity in entity-ids.
+   Returns the tx-id, or nil when no live facts exist for the given entities."
+  [backend entity-ids]
+  (let [current   (query backend {:entities (set entity-ids)})
+        facts     (for [record  current
+                        :let    [entity (:db/entity record)
+                                 attrs  (dissoc record :db/entity)]
+                        [attr val] attrs]
+                    {:entity entity :attribute attr :value val :retracted true})
+        all-facts (vec facts)]
+    (when (seq all-facts)
+      (storage/insert-facts! backend all-facts))))
