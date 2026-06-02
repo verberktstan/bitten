@@ -9,7 +9,7 @@ Some databases record what is true *right now*. Bitten records:
 - **Valid time** - when a fact was true in the real world (e.g. a contract started on 1 January, even if you didn't enter it until March).
 - **Transaction time** - when the fact was written into the database.
 
-This means you can ask questions like *"what did we know about user Alice on 1 June, as of the snapshot we had in September?"* — and get a deterministic answer even after retroactive corrections have been applied.
+This means you can ask questions like *"what did we know about user Alice on 1 June, as of the snapshot we had in September?"*, and get a deterministic answer even after retroactive corrections have been applied.
 
 Facts are never updated or deleted. Every change is a new row; retractions are explicit. The log is the truth.
 
@@ -24,13 +24,45 @@ To be extended with: a TCP server & EDN over the wire
 
 - **[Babashka](https://babashka.org/)** - GraalVM-native Clojure scripting; fast startup, no JVM warm-up.
 - **SQLite** via the `org.babashka/go-sqlite3` pod - embedded, zero-infrastructure persistence.
+- **EDN over TCP** - newline-delimited protocol; any EDN-capable client can talk to the server.
 
-Not yet implemented;
-- **EDN over TCP** - simple line-delimited protocol; any EDN-capable client can talk to the server.
+## Running
 
-## Developing
+```bash
+bb start                   # default: port 5432, db file bitten.db
+PORT=6432 bb start         # custom port
+DB_PATH=/data/my.db bb start   # custom db path
+```
 
-TODO
+The server prints a ready line and blocks until interrupted (`Ctrl-C`). The database file is created and migrated automatically on first start.
+
+### Wire protocol
+
+One EDN map per line in, one EDN map per line out.
+
+**Transact** - upsert one or more records. Each record is a flat map with `:db/entity` plus attribute keys. Only changed attributes are written.
+
+```edn
+{:op :transact :records [{:db/entity "user/1" :user/name "Alice" :user/email "a@example.com"}]}
+;; => {:status :ok :data 1}   ; data is the tx-id, nil for a no-op
+```
+
+**Query** - return live facts for an entity as a flat map.
+
+```edn
+{:op :query :e "user/1"}
+{:op :query :e "user/1" :as-of-valid "2024-06-01"}
+;; => {:status :ok :data ({:db/entity "user/1" :user/name "Alice" ...})}
+```
+
+**Ping**
+
+```edn
+{:op :ping}
+;; => {:status :ok :data :pong}
+```
+
+Errors return `{:status :error :message "..."}`.
 
 ### Logic layer (`src/db.clj`)
 
@@ -40,7 +72,7 @@ TODO
 | `upsert!` | Writes only the attributes that changed; optionally retracts attributes absent from the incoming record (`:missing-keys :retract`). |
 | `retract!` | Retracts all live facts for a seq of entity IDs. Inserts one retraction row per `(entity, attribute, value)` triple. Entities that are already retracted or do not exist are silently skipped. Returns the tx-id, or `nil` for a no-op. |
 
-Storage is abstracted behind an `IStorage` protocol (`src/storage.clj`). The SQLite implementation lives in `src/sqlite.clj`. To add a new backend, implement the three-method protocol in a new file — no changes to `src/db.clj` or the server are needed.
+Storage is abstracted behind an `IStorage` protocol (`src/storage.clj`). The SQLite implementation lives in `src/sqlite.clj`. To add a new backend, implement the three-method protocol in a new file. No changes to `src/db.clj` or the server are needed.
 
 ## Testing
 

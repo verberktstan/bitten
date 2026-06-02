@@ -115,10 +115,15 @@ Storage is abstracted behind a `defprotocol` in `storage.clj`:
 ## Running the Project
 
 ```bash
-bb server.clj          # start the server
-bb test                # run all tests
+bb start                        # start the server (default: port 5432, db bitten.db)
+PORT=6432 DB_PATH=/tmp/x.db bb start   # override port and db path
+bb test                         # run all tests
 echo '{:op :ping}' | nc localhost 5432   # smoke-test
 ```
+
+`bb start` calls `storage/migrate!` on the backend before accepting connections, so the database file is created automatically. The process blocks on `(deref (promise))` and exits on `Ctrl-C`.
+
+**bb.edn task gotcha** — use `:requires` in the task map rather than `(require ...)` inside the `:task` body. SCI's analysis pass resolves qualified symbols (e.g. `sqlite/->SqliteBackend`) before the `require` call runs, causing an "Unable to resolve symbol" error. `:requires` loads the namespaces before analysis.
 
 ## Communicating Intent
 
