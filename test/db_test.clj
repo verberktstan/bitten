@@ -2,20 +2,24 @@
   (:require [clojure.test :refer [deftest is use-fixtures]]
             [babashka.pods :as pods]
             [babashka.fs :as fs]
-            [db :as db]))
+            [db :as db]
+            [storage :as storage]
+            [sqlite :as sqlite-backend]))
 
 (pods/load-pod 'org.babashka/go-sqlite3 "0.3.13")
-(require '[pod.babashka.go-sqlite3 :as sqlite])
+(require '[pod.babashka.go-sqlite3 :as sql-pod])
 
 ;; helpers ;;
 
 (defn- fresh-db []
-  (let [path (str "/tmp/bitten-test-" (System/nanoTime) ".db")]
-    (-> path db/migrate! (assoc :db-path path))))
+  (let [path    (str "/tmp/bitten-test-" (System/nanoTime) ".db")
+        backend (sqlite-backend/->SqliteBackend path)]
+    (storage/migrate! backend)
+    backend))
 
-(defn- insert-raw! [db {:keys [entity attribute value valid-time tx-time tx-id retracted] :as fact}]
+(defn- insert-raw! [backend {:keys [entity attribute value valid-time tx-time tx-id retracted] :as fact}]
   {:pre [(db/assert-fact fact :full)]}
-  (sqlite/execute! db
+  (sql-pod/execute! (:db-path backend)
     ["INSERT INTO facts (entity, attribute, value, valid_time, tx_time, tx_id, retracted)
       VALUES (?, ?, ?, ?, ?, ?, ?)"
      entity attribute value valid-time tx-time tx-id retracted]))
@@ -38,28 +42,28 @@
 ;;; tx 4 (2024-11-01) — carol's name retracted entirely
 ;;;   user/carol  :user/name   "Carol"          valid 2024-01-01  retracted=1
 
-(defn- seed-db! [db]
-  (insert-raw! db {:entity "user/alice" :attribute ":user/name"  :value "Alice"
-                   :valid-time "2024-01-01" :tx-time "2024-01-01"
-                   :tx-id 1 :retracted false})
-  (insert-raw! db {:entity "user/alice" :attribute ":user/email" :value "a@example.com"
-                   :valid-time "2024-01-01" :tx-time "2024-01-01"
-                   :tx-id 1 :retracted false})
-  (insert-raw! db {:entity "user/bob"   :attribute ":user/name"  :value "Bob"
-                   :valid-time "2024-01-01" :tx-time "2024-01-01"
-                   :tx-id 1 :retracted false})
-  (insert-raw! db {:entity "user/carol" :attribute ":user/name"  :value "Carol"
-                   :valid-time "2024-01-01" :tx-time "2024-01-01"
-                   :tx-id 1 :retracted false})
-  (insert-raw! db {:entity "user/alice" :attribute ":user/name"  :value "Alicia"
-                   :valid-time "2024-06-01" :tx-time "2024-06-01"
-                   :tx-id 2 :retracted false})
-  (insert-raw! db {:entity "user/bob"   :attribute ":user/name"  :value "Bob Smith"
-                   :valid-time "2024-01-01" :tx-time "2024-09-01"
-                   :tx-id 3 :retracted false})
-  (insert-raw! db {:entity "user/carol" :attribute ":user/name"  :value "Carol"
-                   :valid-time "2024-01-01" :tx-time "2024-11-01"
-                   :tx-id 4 :retracted true}))
+(defn- seed-db! [backend]
+  (insert-raw! backend {:entity "user/alice" :attribute ":user/name"  :value "Alice"
+                        :valid-time "2024-01-01" :tx-time "2024-01-01"
+                        :tx-id 1 :retracted false})
+  (insert-raw! backend {:entity "user/alice" :attribute ":user/email" :value "a@example.com"
+                        :valid-time "2024-01-01" :tx-time "2024-01-01"
+                        :tx-id 1 :retracted false})
+  (insert-raw! backend {:entity "user/bob"   :attribute ":user/name"  :value "Bob"
+                        :valid-time "2024-01-01" :tx-time "2024-01-01"
+                        :tx-id 1 :retracted false})
+  (insert-raw! backend {:entity "user/carol" :attribute ":user/name"  :value "Carol"
+                        :valid-time "2024-01-01" :tx-time "2024-01-01"
+                        :tx-id 1 :retracted false})
+  (insert-raw! backend {:entity "user/alice" :attribute ":user/name"  :value "Alicia"
+                        :valid-time "2024-06-01" :tx-time "2024-06-01"
+                        :tx-id 2 :retracted false})
+  (insert-raw! backend {:entity "user/bob"   :attribute ":user/name"  :value "Bob Smith"
+                        :valid-time "2024-01-01" :tx-time "2024-09-01"
+                        :tx-id 3 :retracted false})
+  (insert-raw! backend {:entity "user/carol" :attribute ":user/name"  :value "Carol"
+                        :valid-time "2024-01-01" :tx-time "2024-11-01"
+                        :tx-id 4 :retracted true}))
 
 (defn- name-of [results entity]
   (->> results
@@ -82,11 +86,11 @@
 (def ^:dynamic *db* nil)
 
 (defn with-seeded-db [f]
-  (let [{:keys [db-path]} (fresh-db)]
-    (seed-db! db-path)
-    (binding [*db* db-path]
+  (let [backend (fresh-db)]
+    (seed-db! backend)
+    (binding [*db* backend]
       (try (f)
-           (finally (fs/delete-if-exists db-path))))))
+           (finally (fs/delete-if-exists (:db-path backend)))))))
 
 (use-fixtures :each with-seeded-db)
 
@@ -94,45 +98,45 @@
 
 (deftest basic-entity-lookup
   ;; alice at a time when only tx-1 facts exist
-  (let [res (db/query-as-of *db* {:entities   #{"user/alice"}
-                                  :valid-time before-alice-renamed})]
+  (let [res (storage/query-as-of *db* {:entities   #{"user/alice"}
+                                       :valid-time before-alice-renamed})]
     (is (= 2 (count res)))
     (is (some #(= % {:db/entity "user/alice" :db/attribute :user/name  :db/value "Alice"})         res))
     (is (some #(= % {:db/entity "user/alice" :db/attribute :user/email :db/value "a@example.com"}) res))))
 
 (deftest name-changed-in-valid-time
   ;; querying after alice's new valid-time returns the updated name
-  (let [res (db/query-as-of *db* {:entities   #{"user/alice"}
-                                  :valid-time after-alice-renamed})]
+  (let [res (storage/query-as-of *db* {:entities   #{"user/alice"}
+                                       :valid-time after-alice-renamed})]
     (is (= "Alicia" (name-of res "user/alice")))))
 
 (deftest query-before-name-change-valid-time
   ;; querying before alice's new valid-time still returns the old name
-  (let [res (db/query-as-of *db* {:entities   #{"user/alice"}
-                                  :valid-time before-alice-renamed})]
+  (let [res (storage/query-as-of *db* {:entities   #{"user/alice"}
+                                       :valid-time before-alice-renamed})]
     (is (= "Alice" (name-of res "user/alice")))))
 
 (deftest retroactive-correction-before-known
   ;; querying bob as of tx-time BEFORE the correction was recorded → original value
-  (let [res (db/query-as-of *db* {:entities   #{"user/bob"}
-                                  :valid-time before-alice-renamed
-                                  :tx-time    before-bob-corrected})]
+  (let [res (storage/query-as-of *db* {:entities   #{"user/bob"}
+                                       :valid-time before-alice-renamed
+                                       :tx-time    before-bob-corrected})]
     (is (= "Bob" (name-of res "user/bob")))))
 
 (deftest retroactive-correction-after-known
   ;; querying bob as of tx-time AFTER the correction was recorded → corrected value
-  (let [res (db/query-as-of *db* {:entities   #{"user/bob"}
-                                  :valid-time before-alice-renamed})]
+  (let [res (storage/query-as-of *db* {:entities   #{"user/bob"}
+                                       :valid-time before-alice-renamed})]
     (is (= "Bob Smith" (name-of res "user/bob")))))
 
 (deftest retracted-fact-returns-empty
   ;; carol's name was retracted; entity should return no results
-  (let [res (db/query-as-of *db* {:entities #{"user/carol"}})]
+  (let [res (storage/query-as-of *db* {:entities #{"user/carol"}})]
     (is (empty? res))))
 
 (deftest no-entity-filter-returns-all-entities
   ;; omitting :entity returns facts for every entity
-  (let [res      (db/query-as-of *db* {})
+  (let [res      (storage/query-as-of *db* {})
         entities (->> res (map :db/entity) set)]
     (is (contains? entities "user/alice"))
     (is (contains? entities "user/bob"))
@@ -140,17 +144,17 @@
     (is (not (contains? entities "user/carol")))))
 
 (deftest query-before-any-facts-returns-empty
-  (let [res (db/query-as-of *db* {:entities   #{"user/alice"}
-                                  :valid-time before-any-facts})]
+  (let [res (storage/query-as-of *db* {:entities   #{"user/alice"}
+                                       :valid-time before-any-facts})]
     (is (empty? res))))
 
 ;; query ;;
 
 (defn- entity-record
   "Returns the single flat record for an entity from the db, or nil."
-  [db entity]
+  [backend entity]
   (let [props {:entities #{entity}}]
-    (-> db (db/query props) first)))
+    (-> backend (db/query props) first)))
 
 (deftest query-returns-flat-maps-with-entity-key
   (let [result (set (db/query *db* {}))]
@@ -174,37 +178,37 @@
 
 (deftest insert-facts-increments-tx-id
   ;; db is pre-seeded with tx_ids 1–4; new inserts must continue the sequence
-  (let [tx-id-1 (db/insert-facts! *db* [{:entity    "user/dave"
-                                         :attribute ":user/name"
-                                         :value     "Dave"}])
-        tx-id-2 (db/insert-facts! *db* [{:entity    "user/dave"
-                                         :attribute ":user/email"
-                                         :value     "dave@example.com"}])]
+  (let [tx-id-1 (storage/insert-facts! *db* [{:entity    "user/dave"
+                                               :attribute ":user/name"
+                                               :value     "Dave"}])
+        tx-id-2 (storage/insert-facts! *db* [{:entity    "user/dave"
+                                               :attribute ":user/email"
+                                               :value     "dave@example.com"}])]
     (is (integer? tx-id-1))
     (is (= (inc tx-id-1) tx-id-2))))
 
 (deftest insert-facts-groups-batch-under-same-tx-id
-  (let [tx-id (db/insert-facts! *db* [{:entity "user/eve" :attribute ":user/name"  :value "Eve"}
-                                      {:entity "user/eve" :attribute ":user/email" :value "eve@example.com"}])
-        res   (db/query-as-of *db* {:entities #{"user/eve"}})]
+  (let [tx-id (storage/insert-facts! *db* [{:entity "user/eve" :attribute ":user/name"  :value "Eve"}
+                                            {:entity "user/eve" :attribute ":user/email" :value "eve@example.com"}])
+        res   (storage/query-as-of *db* {:entities #{"user/eve"}})]
     (is (integer? tx-id))
     (is (= 2 (count res)))))
 
 (deftest insert-facts-defaults-valid-time-to-now
   ;; no :valid-time supplied; fact is still queryable at far-future valid-time
-  (let [_   (db/insert-facts! *db* [{:entity    "user/frank"
-                                     :attribute ":user/name"
-                                     :value     "Frank"}])
-        res (db/query-as-of *db* {:entities #{"user/frank"}})]
+  (let [_   (storage/insert-facts! *db* [{:entity    "user/frank"
+                                           :attribute ":user/name"
+                                           :value     "Frank"}])
+        res (storage/query-as-of *db* {:entities #{"user/frank"}})]
     (is (= 1 (count res)))
     (is (= "Frank" (:db/value (first res))))))
 
 (deftest insert-facts-retracted-fact-is-suppressed
   ;; inserting a retracted fact should hide it from query results
-  (db/insert-facts! *db* [{:entity    "user/alice"
-                            :attribute ":user/email"
-                            :value     "a@example.com"
-                            :retracted true}])
+  (storage/insert-facts! *db* [{:entity    "user/alice"
+                                 :attribute ":user/email"
+                                 :value     "a@example.com"
+                                 :retracted true}])
   (is (nil? (:user/email (entity-record *db* "user/alice")))))
 
 ;; diff->facts ;;

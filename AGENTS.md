@@ -24,7 +24,7 @@ Every feature follows this mandatory sequence:
 4. **Verify** — run `bb test` (or the project's test runner) and confirm all tests are green. For TCP/server changes, also do a manual smoke-test with `nc` or equivalent.
 
 Never skip or reorder these steps.
-Present benefits and trade-offs to me when we have to choose between different approaches, implementations or concepts, before actual implementation is done.
+Before actual implementation is done. Present benefits and trade-offs whenever there is need to choose between different approaches, implementations or concepts.
 
 ## Idiomatic Clojure
 
@@ -76,8 +76,10 @@ All values are EDN. The server reads one EDN form per line, processes it, and wr
 
 ```
 src/
+  storage.clj     — IStorage protocol (migrate!, insert-facts!, query-as-of)
+  sqlite.clj      — SqliteBackend record + IStorage implementation; all pod/SQL code lives here
+  db.clj          — logic layer: query, upsert!, diff->facts, assert-fact; backend-agnostic
   server.clj      — TCP accept loop, dispatch
-  db.clj          — SQLite connection, schema migration, fact insert/query
   protocol.clj    — EDN parse/serialize helpers
   tx.clj          — transaction ID management
 test/
@@ -86,6 +88,29 @@ test/
   server_test.clj
 bb.edn            — Babashka project config, deps, test runner
 ```
+
+## Backend Architecture
+
+Storage is abstracted behind a `defprotocol` in `storage.clj`:
+
+```clojure
+(defprotocol IStorage
+  (migrate!      [backend])   ; one-time schema setup
+  (insert-facts! [backend facts])  ; append facts, return tx-id
+  (query-as-of   [backend opts]))  ; bi-temporal point query, returns seq of datoms
+```
+
+`sqlite.clj` provides the only current implementation via `(defrecord SqliteBackend [db-path])` + `extend-type`. All pod loading and SQL lives there — nothing in `db.clj` or above knows about SQLite.
+
+**Adding a new backend:**
+1. Create `src/<name>.clj` with a record and an `extend-type` block implementing `IStorage`.
+2. The three protocol methods must honour the same contracts as `SqliteBackend`:
+   - `migrate!` — idempotent schema setup, return value unused.
+   - `insert-facts!` — accepts fact maps with `:entity`, `:attribute`, `:value`, optional `:valid-time` and `:retracted`; returns a monotonically increasing integer tx-id.
+   - `query-as-of` — accepts `{:entities :valid-time :tx-time}` (all optional); returns a seq of `{:db/entity :db/attribute :db/value}` datoms, applying the same bi-temporal ranking logic (latest surviving fact per entity+attribute pair).
+3. No changes to `db.clj`, `server.clj`, or tests are required.
+
+**Layering rule:** only `storage.clj` (the protocol) and `sqlite.clj` (the implementation) may reference `pod.babashka.go-sqlite3`. `db.clj` and above call `storage/` protocol functions only.
 
 ## Running the Project
 
@@ -111,7 +136,7 @@ Hard-won constraints to apply from the start, not rediscover mid-session.
 - The pod API is `(sqlite/execute! db [sql & params])` and `(sqlite/query db [sql & params])` — SQL and params are a **single vector**, not separate arguments. Passing `db sql params` as three separate args silently passes zero parameters to the query engine.
 - `:memory:` databases do not persist across pod calls; each `execute!` / `query` opens a fresh connection. Use a unique temp file per test (e.g. `(str "/tmp/bitten-test-" (System/nanoTime) ".db")`) and delete it in a `finally` block.
 - `BEGIN` / `COMMIT` transactions require a **persistent connection**. Use `(sqlite/get-connection path)` → run statements → `(sqlite/close-connection conn)`. Path-based calls use a new connection per call and will throw "no transaction is active" on `COMMIT`.
-- `migrate!` returns whatever `sqlite/execute!` returns (a result map), making it thread-friendly: `(-> {:db-path path} db/migrate!)`. The fixture extracts the `:db-path` key; `*db*` is always bound to a plain path string before reaching any `db/` function.
+- `storage/migrate!` is called for its side effect; its return value is not used. The test fixture creates a `SqliteBackend` record and binds `*db*` to it — `*db*` is a `SqliteBackend`, not a bare path string. Raw pod calls in test helpers (e.g. `insert-raw!`) extract the path via `(:db-path backend)`.
 
 **Babashka / SCI var behaviour**
 - `^:private` on a bare `def` is **broken in SCI** — the var appears `SciUnbound` at runtime even within the same namespace. Use plain `def` for namespace-level constants in test files; use `defn-` (which does work) for private helper functions.
@@ -149,7 +174,7 @@ Input — a sequence of flat maps where `:db/entity` identifies the record:
 
 ```
 1. Collect all :db/entity values → set of entities
-2. query db {:entities entities} → current state as flat maps
+2. (query backend {:entities entities}) → current state as flat maps
 3. index-by-entity → {"user/alice" {:user/name "Alicia" …}, …}
 4. For each incoming record:
    a. incoming  = (dissoc record :db/entity)
@@ -159,7 +184,7 @@ Input — a sequence of flat maps where `:db/entity` identifies the record:
                   then assoc :entity and :missing-keys into the map
    d. diff->facts → {:changed [...] :retracted [...]}
 5. Flatten all per-record facts with (into [] cat …)
-6. (when (seq all-facts) (insert-facts! db all-facts))
+6. (when (seq all-facts) (storage/insert-facts! backend all-facts))
    → returns tx-id or nil for a pure no-op
 ```
 
