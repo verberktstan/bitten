@@ -15,29 +15,30 @@
 (defn- index-by-entity [records]
   (into {} (map (fn [r] [(:db/entity r) (dissoc r :db/entity)]) records)))
 
-(defn diff->facts
-  "Given a diff map and context, returns {:changed [...] :retracted [...]}.
+(defn- changed-facts [entity from-record]
+  (map (fn [[k v]] {:entity entity :attribute k :value v}) from-record))
 
-   Expects keys: :from-db, :from-record (from clojure.data/diff), :entity,
-   :missing-keys (:ignore or :retract)."
-  [{:keys [from-db from-record entity missing-keys]}]
-  {:changed   (map (fn [[k v]] {:entity entity :attribute k :value v})
-                   from-record)
+(defn- retracted-fact [entity]
+  (fn retracted-fact* [[k v]]
+    {:entity entity :attribute k :value v :retracted true}))
+
+(defn- retracted-facts
+  "Returns retraction facts for keys that vanished from the db record entirely.
+   from-db includes both changed and gone keys; subtracting from-record isolates the gone ones."
+  [entity from-db from-record]
+  (->> (apply dissoc from-db (keys from-record))
+       (map (retracted-fact entity))))
+
+(defn diff->facts [{:keys [from-db from-record entity missing-keys]}]
+  {:changed   (changed-facts entity from-record)
    :retracted (when (= missing-keys :retract)
-                ;; from-db holds both changed and gone keys; subtract the changed
-                ;; ones (present in from-record) to isolate keys that vanished entirely.
-                (->> (apply dissoc from-db (keys from-record))
-                     (map (fn [[k v]]
-                            {:entity    entity
-                             :attribute k
-                             :value     v
-                             :retracted true}))))})
+                (retracted-facts entity from-db from-record))})
 
 (defn query
   "Returns storage/query-as-of results as a sequence of flat maps, each with :db/entity."
   [backend opts]
   (->> (storage/query-as-of backend opts)
-       (reduce (fn [acc {:db/keys [entity attribute value]}]
+       (reduce (fn query* [acc {:db/keys [entity attribute value]}]
                  (update acc entity (fnil assoc {:db/entity entity}) attribute value))
                {})
        vals))
