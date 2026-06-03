@@ -1,7 +1,7 @@
-(ns sqlite
+(ns bitten.sqlite
   (:require [babashka.pods :as pods]
             [clojure.string :as str]
-            [storage]))
+            [bitten.storage]))
 
 (pods/load-pod 'org.babashka/go-sqlite3 "0.3.13")
 (require '[pod.babashka.go-sqlite3 :as sqlite-pod])
@@ -53,7 +53,7 @@
 (defrecord SqliteBackend [db-path])
 
 (extend-type SqliteBackend
-  storage/IStorage
+  bitten.storage/IStorage
 
   (migrate! [{:keys [db-path]}]
     (sqlite-pod/execute! db-path [data-definition]))

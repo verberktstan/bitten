@@ -1,5 +1,5 @@
-(ns db
-  (:require [storage]))
+(ns bitten.db
+  (:require [bitten.storage]))
 
 (def ->eav      (juxt :entity :attribute :value))
 (def ->full-eav (juxt :entity :attribute :value :valid-time :tx-time :tx-id :retracted))
@@ -35,7 +35,7 @@
 (defn query
   "Returns storage/query-as-of results as a sequence of flat maps, each with :db/entity."
   [backend opts]
-  (->> (storage/query-as-of backend opts)
+  (->> (bitten.storage/query-as-of backend opts)
        (reduce (fn [acc {:db/keys [entity attribute value]}]
                  (update acc entity (fnil assoc {:db/entity entity}) attribute value))
                {})
@@ -65,7 +65,7 @@
                       (concat changed retracted))
          all-facts   (into [] cat facts)]
      (when (seq all-facts)
-       (storage/insert-facts! backend all-facts)))))
+       (bitten.storage/insert-facts! backend all-facts)))))
 
 (defn retract!
   "Retracts all live facts for each entity in entity-ids.
@@ -79,4 +79,4 @@
                     {:entity entity :attribute attr :value val :retracted true})
         all-facts (vec facts)]
     (when (seq all-facts)
-      (storage/insert-facts! backend all-facts))))
+      (bitten.storage/insert-facts! backend all-facts))))

@@ -1,4 +1,4 @@
-(ns protocol)
+(ns bitten.protocol)
 
 (defn parse-request [line]
   (try
