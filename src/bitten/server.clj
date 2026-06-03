@@ -24,27 +24,20 @@
           (.flush writer)
           (recur))))))
 
+(defn- parse-query-opts [{:keys [e as-of-valid]}]
+  (cond-> {}
+    e           (assoc :entities   #{e})
+    as-of-valid (assoc :valid-time as-of-valid)))
+
 (defn handle-request [backend {:keys [op error] :as request}]
   (cond
-    error
-    {:status :error :message error}
+    error            {:status :error :message error}
+    (= op :ping)     {:status :ok :data :pong}
+    (= op :transact) {:status :ok :data (db/upsert! backend (:records request))}
+    (= op :query)    {:status :ok :data (db/query backend (parse-query-opts request))}
+    :else            {:status :error :message (str "unknown op: " op)}))
 
-    (= op :ping)
-    {:status :ok :data :pong}
-
-    (= op :transact)
-    {:status :ok :data (db/upsert! backend (:records request))}
-
-    (= op :query)
-    (let [opts (cond-> {}
-                 (:e           request) (assoc :entities    #{(:e request)})
-                 (:as-of-valid request) (assoc :valid-time  (:as-of-valid request)))]
-      {:status :ok :data (db/query backend opts)})
-
-    :else
-    {:status :error :message (str "unknown op: " op)}))
-
-(defn make-edn-handler [backend]
+#_(defn make-edn-handler [backend]
   (fn [line]
     (-> line
         protocol/parse-request
