@@ -324,6 +324,45 @@
     (is (= "Alicia V2" (:user/name (entity-record *db* "user/alice"))))
     (is (= "Bobby"     (:user/name (entity-record *db* "user/bob"))))))
 
+(deftest upsert-new-entity-without-db-entity-assigns-integer-id
+  ;; a record with no :db/entity gets an auto-assigned integer entity id
+  (let [result (db/upsert! *db* [{:user/name "Dave"}])]
+    (is (integer? (:db/entity result)))))
+
+(deftest upsert-new-entity-id-equals-first-inserted-row-id
+  ;; the assigned :db/entity must match the id column of the first row inserted for it
+  (let [result        (db/upsert! *db* [{:user/name "Dave"}])
+        assigned-id   (:db/entity result)
+        rows          (sql-pod/query (:db-path *db*)
+                                     ["SELECT MIN(id) AS first_id FROM facts WHERE entity = ?"
+                                      (str assigned-id)])]
+    (is (= assigned-id (:first_id (first rows))))))
+
+(deftest upsert-new-entity-is-queryable-by-assigned-id
+  ;; after upsert, querying by the returned integer entity id returns the record
+  (let [result      (db/upsert! *db* [{:user/name "Dave"}])
+        assigned-id (:db/entity result)
+        record      (entity-record *db* assigned-id)]
+    (is (= assigned-id (:db/entity record)))
+    (is (= "Dave" (:user/name record)))))
+
+(deftest upsert-multiple-new-entities-get-distinct-ids
+  ;; two records without :db/entity are inserted atomically and each gets a unique integer id
+  (let [result      (db/upsert! *db* [{:user/name "Dave"} {:user/name "Eve"}])
+        assigned-ids (:db/entities result)]
+    (is (= 2 (count assigned-ids)))
+    (is (every? integer? assigned-ids))
+    (is (apply distinct? assigned-ids))))
+
+(deftest upsert-no-entity-mixed-with-existing-entity
+  ;; a nil-entity record alongside a has-entity record both succeed in one call
+  (let [result      (db/upsert! *db* [{:user/name "Dave"}
+                                       {:db/entity "user/alice" :user/name "Alicia V2"}])
+        assigned-id (:db/entity result)]
+    (is (integer? assigned-id))
+    (is (= "Dave"      (:user/name (entity-record *db* assigned-id))))
+    (is (= "Alicia V2" (:user/name (entity-record *db* "user/alice"))))))
+
 ;; retract! ;;
 
 (deftest retract-entity-removes-all-live-attributes
