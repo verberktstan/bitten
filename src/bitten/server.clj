@@ -1,6 +1,5 @@
 (ns bitten.server
-  (:require [bitten.db :as db]
-            [bitten.storage.protocol :as protocol]))
+  (:require [bitten.db :as db]))
 
 (defn- buffered-reader [input-stream]
   (-> input-stream java.io.InputStreamReader. java.io.BufferedReader.))
@@ -37,12 +36,15 @@
     (= op :query)    {:status :ok :data (db/query backend (parse-query-opts request))}
     :else            {:status :error :message (str "unknown op: " op)}))
 
-#_(defn make-edn-handler [backend]
-  (fn [line]
-    (-> line
-        protocol/parse-request
-        (->> (handle-request backend))
-        protocol/serialize-response)))
+(defn- accept-loop
+  "Accepts connections from server until it is closed.
+   SocketException on .accept is how .close signals shutdown — swallowed intentionally."
+  [server handler]
+  (try
+    (loop []
+      (future (handle-connection! (.accept server) handler))
+      (recur))
+    (catch java.net.SocketException _ nil)))
 
 (defn start-server!
   "Starts a TCP server on port (0 = OS-assigned). Spawns one thread per accepted
@@ -51,12 +53,5 @@
    it to stop accepting new connections."
   [port handler]
   (let [server (java.net.ServerSocket. port)]
-    (future
-      (try
-        (loop []
-          (let [client (.accept server)]
-            (future (handle-connection! client handler))
-            (recur)))
-        (catch java.net.SocketException _
-          nil)))   ; .close on server causes .accept to throw and exit the loop
+    (future (accept-loop server handler))
     server))
