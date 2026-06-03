@@ -3,8 +3,8 @@
             [babashka.pods :as pods]
             [babashka.fs :as fs]
             [bitten.server :as server]
-            [bitten.storage :as storage]
-            [bitten.sqlite :as sqlite-backend]
+            [bitten.storage.core :as storage]
+            [bitten.storage.sqlite :as sqlite-backend]
             [bitten.db :as db]))
 
 (pods/load-pod 'org.babashka/go-sqlite3 "0.3.13")

@@ -2,12 +2,12 @@
  :pods  {org.babashka/go-sqlite3 {:version "0.3.13"}}
  :tasks
  {test  {:doc  "Run all tests"
-         :task (do (require 'bitten.db-test 'bitten.server-test 'bitten.protocol-test)
-                   (let [{:keys [fail error]} (clojure.test/run-tests 'bitten.db-test 'bitten.server-test 'bitten.protocol-test)]
+         :task (do (require 'bitten.db-test 'bitten.server-test 'bitten.storage.protocol-test)
+                   (let [{:keys [fail error]} (clojure.test/run-tests 'bitten.db-test 'bitten.server-test 'bitten.storage.protocol-test)]
                      (System/exit (+ fail error))))}
 
   start {:doc      "Start the Bitten server (PORT and DB_PATH env vars optional)"
-         :requires ([bitten.server :as server] [bitten.sqlite :as sqlite] [bitten.storage :as storage])
+         :requires ([bitten.server :as server] [bitten.storage.sqlite :as sqlite] [bitten.storage.storage :as storage])
          :task     (let [port    (parse-long (or (System/getenv "PORT") "5432"))
                          db-path (or (System/getenv "DB_PATH") "bitten.db")
                          backend (sqlite/->SqliteBackend db-path)]

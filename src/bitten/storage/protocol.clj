@@ -1,4 +1,4 @@
-(ns bitten.protocol)
+(ns bitten.storage.protocol)
 
 (defn parse-request [line]
   (try

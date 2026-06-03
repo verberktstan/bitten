@@ -1,4 +1,4 @@
-(ns bitten.storage)
+(ns bitten.storage.core)
 
 (defprotocol IStorage
   (migrate!      [backend])
