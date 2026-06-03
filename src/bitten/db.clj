@@ -1,5 +1,6 @@
 (ns bitten.db
-  (:require [bitten.storage.core :as storage]))
+  (:require [bitten.storage.core :as storage]
+            [clojure.data :as data]))
 
 (def ->eav      (juxt :entity :attribute :value))
 (def ->full-eav (juxt :entity :attribute :value :valid-time :tx-time :tx-id :retracted))
@@ -41,30 +42,30 @@
                {})
        vals))
 
-(defn upsert!
-  "Applies data-records to the backend, writing only changed key/value pairs as facts.
-   Each record must contain :db/entity; remaining keys are attribute/value pairs.
-   Returns the assigned tx-id, or nil when no facts changed.
+(defn- record->diff [record existing missing-keys]
+  (let [entity   (:db/entity record)
+        incoming (dissoc record :db/entity)]
+    (-> (zipmap [:from-db :from-record] (data/diff existing incoming))
+        (assoc :entity entity :missing-keys missing-keys))))
 
-   opts:
-     :missing-keys — :ignore (default) leaves absent attributes untouched;
-                     :retract retracts attributes present in the db but absent
-                     from the incoming record."
-  ([backend records] (upsert! backend records {}))
+(def changed-and-retracted (juxt :changed :retracted))
+
+(defn upsert!
+  "Writes only changed facts from records to backend. Returns tx-id or nil.
+   (upsert! db [{:db/entity \"user/1\" :name \"Alice\"}])
+   :missing-keys — :ignore (default) leaves absent attributes untouched;
+   :retract removes them."
+  ([backend records] (upsert! backend records nil))
   ([backend records {:keys [missing-keys] :or {missing-keys :ignore}}]
    (let [entities    (into #{} (map :db/entity records))
-         current-idx (->> (query backend {:entities entities}) index-by-entity)
-         facts       (for [record  records
-                           :let    [entity              (:db/entity record)
-                                    incoming            (dissoc record :db/entity)
-                                    existing            (get current-idx entity {})
-                                    diff                (-> (zipmap [:from-db :from-record]
-                                                                    (clojure.data/diff existing incoming))
-                                                            (assoc :entity entity :missing-keys missing-keys))
-                                    {:keys [changed retracted]} (diff->facts diff)]]
-                      (concat changed retracted))
-         all-facts   (into [] cat facts)]
-     (when (seq all-facts)
+         current-idx (->> {:entities entities} (query backend) index-by-entity)
+         facts       (for [{:db/keys [entity] :as record} records
+                           :let [existing   (get current-idx entity {})
+                                 diff-facts (-> record
+                                                (record->diff existing missing-keys)
+                                                diff->facts)]]
+                       (->> diff-facts changed-and-retracted (apply concat)))]
+     (when-let [all-facts (->> facts (into [] cat) seq)]
        (storage/insert-facts! backend all-facts)))))
 
 (defn retract!
