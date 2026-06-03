@@ -42,28 +42,24 @@
 ;;; tx 4 (2024-11-01) — carol's name retracted entirely
 ;;;   user/carol  :user/name   "Carol"          valid 2024-01-01  retracted=1
 
+(def ^:private seed-facts
+  [{:entity "user/alice" :attribute ":user/name"  :value "Alice"
+    :valid-time "2024-01-01" :tx-time "2024-01-01" :tx-id 1 :retracted false}
+   {:entity "user/alice" :attribute ":user/email" :value "a@example.com"
+    :valid-time "2024-01-01" :tx-time "2024-01-01" :tx-id 1 :retracted false}
+   {:entity "user/bob"   :attribute ":user/name"  :value "Bob"
+    :valid-time "2024-01-01" :tx-time "2024-01-01" :tx-id 1 :retracted false}
+   {:entity "user/carol" :attribute ":user/name"  :value "Carol"
+    :valid-time "2024-01-01" :tx-time "2024-01-01" :tx-id 1 :retracted false}
+   {:entity "user/alice" :attribute ":user/name"  :value "Alicia"
+    :valid-time "2024-06-01" :tx-time "2024-06-01" :tx-id 2 :retracted false}
+   {:entity "user/bob"   :attribute ":user/name"  :value "Bob Smith"
+    :valid-time "2024-01-01" :tx-time "2024-09-01" :tx-id 3 :retracted false}
+   {:entity "user/carol" :attribute ":user/name"  :value "Carol"
+    :valid-time "2024-01-01" :tx-time "2024-11-01" :tx-id 4 :retracted true}])
+
 (defn- seed-db! [backend]
-  (insert-raw! backend {:entity "user/alice" :attribute ":user/name"  :value "Alice"
-                        :valid-time "2024-01-01" :tx-time "2024-01-01"
-                        :tx-id 1 :retracted false})
-  (insert-raw! backend {:entity "user/alice" :attribute ":user/email" :value "a@example.com"
-                        :valid-time "2024-01-01" :tx-time "2024-01-01"
-                        :tx-id 1 :retracted false})
-  (insert-raw! backend {:entity "user/bob"   :attribute ":user/name"  :value "Bob"
-                        :valid-time "2024-01-01" :tx-time "2024-01-01"
-                        :tx-id 1 :retracted false})
-  (insert-raw! backend {:entity "user/carol" :attribute ":user/name"  :value "Carol"
-                        :valid-time "2024-01-01" :tx-time "2024-01-01"
-                        :tx-id 1 :retracted false})
-  (insert-raw! backend {:entity "user/alice" :attribute ":user/name"  :value "Alicia"
-                        :valid-time "2024-06-01" :tx-time "2024-06-01"
-                        :tx-id 2 :retracted false})
-  (insert-raw! backend {:entity "user/bob"   :attribute ":user/name"  :value "Bob Smith"
-                        :valid-time "2024-01-01" :tx-time "2024-09-01"
-                        :tx-id 3 :retracted false})
-  (insert-raw! backend {:entity "user/carol" :attribute ":user/name"  :value "Carol"
-                        :valid-time "2024-01-01" :tx-time "2024-11-01"
-                        :tx-id 4 :retracted true}))
+  (run! (partial insert-raw! backend) seed-facts))
 
 (defn- name-of [results entity]
   (->> results
