@@ -1,7 +1,7 @@
-(ns protocol-test
+(ns bitten.storage.protocol-test
   (:require [clojure.edn :as edn]
             [clojure.test :refer [deftest is]]
-            [protocol :as protocol]))
+            [bitten.storage.protocol :as protocol]))
 
 ;; parse-request ;;
 

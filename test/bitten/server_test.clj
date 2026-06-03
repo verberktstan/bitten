@@ -1,11 +1,11 @@
-(ns server-test
+(ns bitten.server-test
   (:require [clojure.test :refer [deftest is]]
             [babashka.pods :as pods]
             [babashka.fs :as fs]
-            [server :as server]
-            [storage :as storage]
-            [sqlite :as sqlite-backend]
-            [db :as db]))
+            [bitten.server :as server]
+            [bitten.storage.core :as storage]
+            [bitten.storage.sqlite :as sqlite-backend]
+            [bitten.db :as db]))
 
 (pods/load-pod 'org.babashka/go-sqlite3 "0.3.13")
 

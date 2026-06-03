@@ -1,7 +1,7 @@
-(ns sqlite
+(ns bitten.storage.sqlite
   (:require [babashka.pods :as pods]
             [clojure.string :as str]
-            [storage]))
+            [bitten.storage.core :as storage]))
 
 (pods/load-pod 'org.babashka/go-sqlite3 "0.3.13")
 (require '[pod.babashka.go-sqlite3 :as sqlite-pod])

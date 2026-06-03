@@ -1,5 +1,5 @@
-(ns db
-  (:require [storage]))
+(ns bitten.db
+  (:require [bitten.storage.core :as storage]))
 
 (def ->eav      (juxt :entity :attribute :value))
 (def ->full-eav (juxt :entity :attribute :value :valid-time :tx-time :tx-id :retracted))

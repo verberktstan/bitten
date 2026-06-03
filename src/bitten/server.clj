@@ -1,7 +1,6 @@
-(ns server
-  (:require [storage]
-            [db]
-            [protocol]))
+(ns bitten.server
+  (:require [bitten.db :as db]
+            [bitten.storage.protocol :as protocol]))
 
 (defn- buffered-reader [input-stream]
   (-> input-stream java.io.InputStreamReader. java.io.BufferedReader.))
