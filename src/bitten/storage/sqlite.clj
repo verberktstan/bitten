@@ -26,6 +26,11 @@
       first
       :next_id))
 
+(defn- next-row-id! [conn]
+  (-> (sqlite-pod/query conn ["SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM facts"])
+      first
+      :next_id))
+
 (defn- parse-attr [s]
   (let [v (clojure.edn/read-string s)]
     (if (keyword? v) v s)))
@@ -63,15 +68,30 @@
           conn    (sqlite-pod/get-connection db-path)]
       (try
         (sqlite-pod/execute! conn ["BEGIN"])
-        (let [tx-id (next-tx-id! conn)]
-          (doseq [{:keys [entity attribute value valid-time retracted]
-                   :or   {valid-time tx-time retracted false}} facts]
-            (sqlite-pod/execute! conn
-                                 ["INSERT INTO facts (entity, attribute, value, valid_time, tx_time, tx_id, retracted)
-                                   VALUES (?, ?, ?, ?, ?, ?, ?)"
-                                  (str entity) (str attribute) (str value) valid-time tx-time tx-id retracted]))
+        (let [tx-id       (next-tx-id! conn)
+              base-row-id (next-row-id! conn)
+              {:keys [entity-map]}
+              (reduce
+                (fn [{:keys [entity-map rows-inserted]} fact]
+                  (let [{:keys [entity attribute value valid-time retracted]
+                         :or   {valid-time tx-time retracted false}} fact
+                        [assigned-entity new-entity-map]
+                        (if (keyword? entity)
+                          (if-let [existing-id (get entity-map entity)]
+                            [existing-id entity-map]
+                            (let [new-id (+ base-row-id rows-inserted)]
+                              [new-id (assoc entity-map entity new-id)]))
+                          [entity entity-map])]
+                    (sqlite-pod/execute! conn
+                                        ["INSERT INTO facts (entity, attribute, value, valid_time, tx_time, tx_id, retracted)
+                                          VALUES (?, ?, ?, ?, ?, ?, ?)"
+                                         (str assigned-entity) (str attribute) (str value)
+                                         valid-time tx-time tx-id retracted])
+                    {:entity-map new-entity-map :rows-inserted (inc rows-inserted)}))
+                {:entity-map {} :rows-inserted 0}
+                facts)]
           (sqlite-pod/execute! conn ["COMMIT"])
-          tx-id)
+          {:tx-id tx-id :new-entity-ids (when (seq entity-map) entity-map)})
         (catch Exception e
           (try (sqlite-pod/execute! conn ["ROLLBACK"]) (catch Exception _ nil))
           (throw e))

@@ -65,7 +65,7 @@
                       (concat changed retracted))
          all-facts   (into [] cat facts)]
      (when (seq all-facts)
-       (storage/insert-facts! backend all-facts)))))
+       (:tx-id (storage/insert-facts! backend all-facts))))))
 
 (defn retract!
   "Retracts all live facts for each entity in entity-ids.
@@ -79,4 +79,4 @@
                     {:entity entity :attribute attr :value val :retracted true})
         all-facts (vec facts)]
     (when (seq all-facts)
-      (storage/insert-facts! backend all-facts))))
+      (:tx-id (storage/insert-facts! backend all-facts)))))

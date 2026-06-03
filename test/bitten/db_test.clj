@@ -178,20 +178,20 @@
 
 (deftest insert-facts-increments-tx-id
   ;; db is pre-seeded with tx_ids 1–4; new inserts must continue the sequence
-  (let [tx-id-1 (storage/insert-facts! *db* [{:entity    "user/dave"
-                                               :attribute ":user/name"
-                                               :value     "Dave"}])
-        tx-id-2 (storage/insert-facts! *db* [{:entity    "user/dave"
-                                               :attribute ":user/email"
-                                               :value     "dave@example.com"}])]
-    (is (integer? tx-id-1))
-    (is (= (inc tx-id-1) tx-id-2))))
+  (let [result-1 (storage/insert-facts! *db* [{:entity    "user/dave"
+                                                :attribute ":user/name"
+                                                :value     "Dave"}])
+        result-2 (storage/insert-facts! *db* [{:entity    "user/dave"
+                                                :attribute ":user/email"
+                                                :value     "dave@example.com"}])]
+    (is (integer? (:tx-id result-1)))
+    (is (= (inc (:tx-id result-1)) (:tx-id result-2)))))
 
 (deftest insert-facts-groups-batch-under-same-tx-id
-  (let [tx-id (storage/insert-facts! *db* [{:entity "user/eve" :attribute ":user/name"  :value "Eve"}
-                                            {:entity "user/eve" :attribute ":user/email" :value "eve@example.com"}])
-        res   (storage/query-as-of *db* {:entities #{"user/eve"}})]
-    (is (integer? tx-id))
+  (let [result (storage/insert-facts! *db* [{:entity "user/eve" :attribute ":user/name"  :value "Eve"}
+                                             {:entity "user/eve" :attribute ":user/email" :value "eve@example.com"}])
+        res    (storage/query-as-of *db* {:entities #{"user/eve"}})]
+    (is (integer? (:tx-id result)))
     (is (= 2 (count res)))))
 
 (deftest insert-facts-defaults-valid-time-to-now
@@ -210,6 +210,43 @@
                                  :value     "a@example.com"
                                  :retracted true}])
   (is (nil? (:user/email (entity-record *db* "user/alice")))))
+
+(deftest insert-facts-returns-map-with-tx-id
+  ;; return type is now a map; :new-entity-ids is nil when all entities are explicit
+  (let [result (storage/insert-facts! *db* [{:entity    "user/dave"
+                                              :attribute ":user/name"
+                                              :value     "Dave"}])]
+    (is (map? result))
+    (is (integer? (:tx-id result)))
+    (is (nil? (:new-entity-ids result)))))
+
+(deftest insert-facts-keyword-entity-assigns-row-id
+  ;; a keyword placeholder entity is replaced with the autoincrement row id
+  (let [result        (storage/insert-facts! *db* [{:entity    :bitten/new-0
+                                                     :attribute ":user/name"
+                                                     :value     "Frank"}])
+        new-entity-id (get (:new-entity-ids result) :bitten/new-0)]
+    (is (integer? new-entity-id))
+    (let [rows (sql-pod/query (:db-path *db*)
+                              ["SELECT id, entity FROM facts WHERE entity = ?"
+                               (str new-entity-id)])]
+      (is (= 1 (count rows)))
+      (is (= (str new-entity-id) (:entity (first rows)))))))
+
+(deftest insert-facts-multiple-keyword-entities-get-sequential-ids
+  ;; two placeholder keywords in one call each get a distinct entity id;
+  ;; the second id is greater than the first (rows are assigned in order)
+  (let [result (storage/insert-facts! *db*
+                                      [{:entity :bitten/new-0 :attribute ":user/name"  :value "A"}
+                                       {:entity :bitten/new-0 :attribute ":user/email" :value "a@x.com"}
+                                       {:entity :bitten/new-1 :attribute ":user/name"  :value "B"}])
+        new-ids (:new-entity-ids result)
+        id-0    (get new-ids :bitten/new-0)
+        id-1    (get new-ids :bitten/new-1)]
+    (is (integer? id-0))
+    (is (integer? id-1))
+    (is (not= id-0 id-1))
+    (is (< id-0 id-1))))
 
 ;; diff->facts ;;
 
