@@ -82,6 +82,22 @@ bb test
 
 Tests use real SQLite temp files (one per test, cleaned up in a `finally` block). There is no mocking of the storage layer.
 
+## Development
+
+For Emacs/CIDER, use `M-x cider-jack-in-universal` to start a Babashka REPL for development purposes. It handles launching and connecting in one step.
+
+To start a nREPL server directly:
+
+```bash
+bb nrepl-server 1667
+```
+
+Or use the project task, which additionally writes a `.nrepl-port` file so CIDER can auto-detect the port:
+
+```bash
+bb nrepl
+```
+
 ## License
 
 Copyright © 2026 Stan Verberkt

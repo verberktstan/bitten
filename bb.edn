@@ -6,6 +6,12 @@
                    (let [{:keys [fail error]} (clojure.test/run-tests 'bitten.db-test 'bitten.server-test 'bitten.storage.protocol-test)]
                      (System/exit (+ fail error))))}
 
+  nrepl  {:doc  "Start nREPL server for editor connection (port 1667)"
+         :task (do (spit ".nrepl-port" "1667")
+                   (babashka.nrepl.server/start-server! {:host "localhost" :port 1667})
+                   (println "nREPL server started on port 1667. Connect with M-x cider-connect (Emacs)")
+                   (deref (promise)))}
+
   start {:doc      "Start the Bitten server (PORT and DB_PATH env vars optional)"
          :requires ([bitten.server :as server] [bitten.storage.sqlite :as sqlite] [bitten.storage.storage :as storage])
          :task     (let [port    (parse-long (or (System/getenv "PORT") "5432"))
