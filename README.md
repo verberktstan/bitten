@@ -18,7 +18,6 @@ Facts are never updated or deleted. Every change is a new row; retractions are e
 Bitten makes audit trails and temporal queries structural: the schema enforces append-only writes, and every query is implicitly bi-temporal. There is no separate audit table to maintain or forget to update.
 
 The implementation is intentionally small; a single SQLite table. The core model stays legible and the storage backend can be swapped without touching application logic.
-To be extended with: a TCP server & EDN over the wire
 
 ## Stack
 
