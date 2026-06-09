@@ -51,6 +51,9 @@
 
 (def changed-and-retracted (juxt :changed :retracted))
 
+(defn- ensure-entity [{:db/keys [entity] :as record}]
+  (cond-> record (not entity) (assoc :db/entity (str (random-uuid))))
+
 (defn upsert!
   "Writes only changed facts from records to backend. Returns tx-id or nil.
    (upsert! db [{:db/entity \"user/1\" :name \"Alice\"}])
@@ -58,7 +61,8 @@
    :retract removes them."
   ([backend records] (upsert! backend records nil))
   ([backend records {:keys [missing-keys] :or {missing-keys :ignore}}]
-   (let [entities    (into #{} (map :db/entity records))
+   (let [records     (map ensure-entity records)
+         entities    (into #{} (map :db/entity records))
          current-idx (->> {:entities entities} (query backend) index-by-entity)
          facts       (for [{:db/keys [entity] :as record} records
                            :let [existing   (get current-idx entity {})
