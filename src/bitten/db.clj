@@ -52,7 +52,7 @@
 (def changed-and-retracted (juxt :changed :retracted))
 
 (defn- ensure-entity [{:db/keys [entity] :as record}]
-  (cond-> record (not entity) (assoc :db/entity (str (random-uuid))))
+  (cond-> record (not entity) (assoc :db/entity (str (random-uuid)))))
 
 (defn upsert!
   "Writes only changed facts from records to backend. Returns tx-id or nil.
