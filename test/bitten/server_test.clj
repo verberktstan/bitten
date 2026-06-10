@@ -1,5 +1,5 @@
 (ns bitten.server-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is use-fixtures]]
             [babashka.pods :as pods]
             [babashka.fs :as fs]
             [bitten.server :as server]
@@ -79,50 +79,55 @@
           (finally (close-conn! conn))))
       (finally (.close srv)))))
 
+;; fixture ;;
+
+(def ^:dynamic *db* nil)
+
+(defn- with-db [f]
+  (let [backend (fresh-db)]
+    (binding [*db* backend]
+      (try (f)
+           (finally (fs/delete-if-exists (:db-path backend)))))))
+
+(use-fixtures :each with-db)
+
 ;; handle-request ;;
 
 (deftest handle-request-ping
-  (let [backend (fresh-db)]
-    (try
-      (is (= {:status :ok :data :pong}
-             (server/handle-request backend {:op :ping})))
-      (finally (fs/delete-if-exists (:db-path backend))))))
+  (is (= {:status :ok :data :pong}
+         (server/handle-request *db* {:op :ping}))))
 
 (deftest handle-request-transact-upserts-records
-  (let [backend (fresh-db)]
-    (try
-      (let [response (server/handle-request backend
-                       {:op      :transact
-                        :records [{:db/entity "user/1" :user/name "Alice"}]})]
-        (is (= :ok (:status response)))
-        (is (integer? (:data response)))
-        (let [results (db/query backend {:entities #{"user/1"}})]
-          (is (= 1 (count results)))
-          (is (= "Alice" (:user/name (first results))))))
-      (finally (fs/delete-if-exists (:db-path backend))))))
+  (try
+    (let [response (server/handle-request *db*
+                                          {:op      :transact
+                                           :records [{:db/entity "user/1" :user/name "Alice"}]})]
+      (is (= :ok (:status response)))
+      (is (integer? (:data response)))
+      (let [results (db/query *db* {:entities #{"user/1"}})]
+        (is (= 1 (count results)))
+        (is (= "Alice" (:user/name (first results))))))
+    (finally (fs/delete-if-exists (:db-path *db*)))))
 
 (deftest handle-request-query-returns-data
-  (let [backend (fresh-db)]
-    (try
-      (storage/insert-facts! backend [{:entity "user/2" :attribute ":user/name" :value "Bob"}])
-      (let [response (server/handle-request backend {:op :query :e "user/2"})]
-        (is (= :ok (:status response)))
-        (is (= 1 (count (:data response))))
-        (is (= "Bob" (:user/name (first (:data response))))))
-      (finally (fs/delete-if-exists (:db-path backend))))))
+  (try
+    (storage/insert-facts! *db* [{:entity "user/2" :attribute ":user/name" :value "Bob"}])
+    (let [response (server/handle-request *db* {:op :query :e "user/2"})]
+      (is (= :ok (:status response)))
+      (is (= 1 (count (:data response))))
+      (is (= "Bob" (:user/name (first (:data response))))))
+    (finally (fs/delete-if-exists (:db-path *db*)))))
 
 (deftest handle-request-unknown-op-returns-error
-  (let [backend (fresh-db)]
-    (try
-      (let [response (server/handle-request backend {:op :frobulate})]
-        (is (= :error (:status response)))
-        (is (string? (:message response))))
-      (finally (fs/delete-if-exists (:db-path backend))))))
+  (try
+    (let [response (server/handle-request *db* {:op :frobulate})]
+      (is (= :error (:status response)))
+      (is (string? (:message response))))
+    (finally (fs/delete-if-exists (:db-path *db*)))))
 
 (deftest handle-request-parse-error-returns-error
-  (let [backend (fresh-db)]
-    (try
-      (let [response (server/handle-request backend {:error "bad EDN input"})]
-        (is (= :error (:status response)))
-        (is (string? (:message response))))
-      (finally (fs/delete-if-exists (:db-path backend))))))
+  (try
+    (let [response (server/handle-request *db* {:error "bad EDN input"})]
+      (is (= :error (:status response)))
+      (is (string? (:message response))))
+    (finally (fs/delete-if-exists (:db-path *db*)))))

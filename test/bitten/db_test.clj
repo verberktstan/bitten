@@ -81,7 +81,7 @@
 
 (def ^:dynamic *db* nil)
 
-(defn with-seeded-db [f]
+(defn- with-seeded-db [f]
   (let [backend (fresh-db)]
     (seed-db! backend)
     (binding [*db* backend]
